@@ -118,7 +118,32 @@ void* cruzar_canal_prioridad(void* arg) {
 
     pthread_exit(NULL);
 }
+void* cruzar_canal_fcfs(void* arg) {
+  Barco* barco = (Barco*)arg;
 
+  while (barco->tiempo_restante > 0) {
+    pthread_mutex_lock(&canal_mutex);
+    //espera al letrero para avanzar
+    while (strcmp(barco->oceano, barco->tipo) != 0) {
+      pthread_cond_wait(&canal_disponible, &canal_mutex);
+
+    }
+    //desbloquea el mutex
+    pthread_mutex_unlock(&canal_mutex);
+     printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, barco->tiempo_restante);
+    sleep(barco->tiempo_restante);
+
+    //Bloqua el mutex
+    pthread_mutex_lock(&canal_mutex);
+    printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+
+      // Notificar a otros barcos que pueden avanzar
+    pthread_cond_broadcast(&canal_disponible);
+    pthread_mutex_unlock(&canal_mutex);
+
+  }
+  pthread_exit(NULL);
+}
 // Función que simula el cruce de un barco con algoritmo Round Robin
 void* cruzar_canal_round_robin(void* arg) {
     Barco* barco = (Barco*)arg;
