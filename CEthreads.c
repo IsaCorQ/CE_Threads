@@ -1,5 +1,4 @@
 #define _GNU_SOURCE
-#include "CEthreads.h"
 #include <sched.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,21 +7,49 @@
 #include <errno.h>
 #include <stdatomic.h>
 
-// Thread creation function
-int cethread_create(cethread *thread, const void *attr, void *(*start_routine) (void *), void *arg) {
-    (void)attr;
+#define STACK_SIZE (1024 * 1024)
+
+
+// CETHREAD definition
+typedef struct {
+    pid_t pid;
+    void* (*start_routine)(void*);
+    void* arg;
+    void* stack;
+    void* return_value;
+    atomic_int status;
+} cethread_t;
+
+// Mutex implementation using atomic_flag
+typedef struct {
+    atomic_flag lock;
+    atomic_int value;
+} cemutex_t;
+
+// Condition variable implementation using atomic_int
+typedef struct {
+    atomic_int waiting_threads;
+} cecond_t;
+
+// CETHREAD Functions
+int cethread_create(cethread_t *thread, const void *attr,
+                    void *(*start_routine) (void *), void *arg) {
+    (void)attr;  // Ignore attr for this implementation
 
     thread->start_routine = start_routine;
     thread->arg = arg;
     thread->status = 0;
 
+    // Allocate aligned stack for the thread
     thread->stack = aligned_alloc(16, STACK_SIZE);
     if (!thread->stack) {
         perror("Failed to allocate stack");
         return -1;
     }
 
-    thread->pid = clone((int (*)(void *))start_routine, (char*)thread->stack + STACK_SIZE, CLONE_VM | CLONE_FS | CLONE_FILES | SIGCHLD, arg);
+    // Create the thread using clone
+    thread->pid = clone((int (*)(void *))start_routine, (char*)thread->stack + STACK_SIZE,
+                        CLONE_VM | CLONE_FS | CLONE_FILES | SIGCHLD, arg);
     if (thread->pid == -1) {
         perror("clone failed");
         free(thread->stack);
@@ -31,8 +58,7 @@ int cethread_create(cethread *thread, const void *attr, void *(*start_routine) (
     return 0;
 }
 
-// Thread join function
-int cethread_join(cethread *thread, void **retval) {
+int cethread_join(cethread_t *thread, void **retval) {
     int status;
     waitpid(thread->pid, &status, 0);
 
@@ -44,93 +70,49 @@ int cethread_join(cethread *thread, void **retval) {
     return 0;
 }
 
-// Mutex initialization function
-void cemutex_init(cemutex *mutex) {
+void cethread_exit(void* retval) {
+    return;
+}
+// Mutex Functions
+void cemutex_init(cemutex_t *mutex) {
     atomic_flag_clear(&mutex->lock);
+    atomic_init(&mutex->value, 0);
 }
 
-// Mutex locking function
-void cemutex_lock(cemutex *mutex) {
+void cemutex_lock(cemutex_t *mutex) {
     while (atomic_flag_test_and_set(&mutex->lock)) {
+        // Spin until we acquire the lock
     }
+    atomic_store(&mutex->value, 1);
 }
 
-// Mutex unlocking function
-void cemutex_unlock(cemutex *mutex) {
+void cemutex_unlock(cemutex_t *mutex) {
+    atomic_store(&mutex->value, 0);
     atomic_flag_clear(&mutex->lock);
 }
 
-// Shared counter and mutex
-int shared_counter = 0;
-cemutex counter_mutex;
-
-// Function to increment the counter with mutex locking
-void *increment_counter(void *arg) {
-    for (int i = 0; i < INCREMENTS_PER_THREAD; i++) {
-        cemutex_lock(&counter_mutex);
-        shared_counter++;
-        cemutex_unlock(&counter_mutex);
-    }
-    return NULL;
+void cemutex_destroy(cemutex_t *mutex) {
+    // Nothing special to destroy in this simple implementation
 }
 
-// Sample function for thread execution (from second file)
-int ce_thread_function(void* arg) {
-    int thread_num = *(int*)arg;
-    printf("Hello from my thread %d\n", thread_num);
-    free(arg);  // Free memory for thread-specific data
-    fflush(stdout);
-    return 0;
+// Condition Variable Functions
+void cecond_init(cecond_t *cond) {
+    atomic_init(&cond->waiting_threads, 0);
 }
 
-// Main function to demonstrate both thread types
-int main() {
-    cethread threads[NUM_THREADS];
-
-    // Initialize the mutex
-    cemutex_init(&counter_mutex);
-
-    // Create and run threads for printing messages
-    printf("Creating threads for message printing...\n");
-    for (int i = 0; i < NUM_THREADS; i++) {
-        int* thread_id = malloc(sizeof(int));
-        if (!thread_id) {
-            fprintf(stderr, "Error allocating memory for thread ID\n");
-            return 1;
-        }
-        *thread_id = i + 1;
-
-        if (cethread_create(&threads[i], NULL, (void* (*)(void*))ce_thread_function, thread_id) != 0) {
-            fprintf(stderr, "Error creating thread %d\n", i + 1);
-            free(thread_id);
-            return 1;
-        }
+void cecond_wait(cecond_t *cond, cemutex_t *mutex) {
+    cemutex_unlock(mutex);  // Release the mutex while waiting for condition
+    while (atomic_load(&cond->waiting_threads) == 0) {
+        // Spin-wait (no busy waiting, mutex is unlocked here)
+        usleep(100);  // Small sleep to reduce CPU usage
     }
+    cemutex_lock(mutex);  // Reacquire the mutex when done
+}
 
-    // Join the threads
-    for (int i = 0; i < NUM_THREADS; i++) {
-        cethread_join(&threads[i], NULL);
-    }
+void cecond_broadcast(cecond_t *cond) {
+    atomic_store(&cond->waiting_threads, 1);  // Notify all waiting threads
+}
 
-    printf("All message threads finished execution\n");
-
-    // Create and run threads for incrementing the counter
-    printf("Creating threads for incrementing counter...\n");
-    for (int i = 0; i < NUM_THREADS; i++) {
-        if (cethread_create(&threads[i], NULL, increment_counter, NULL) != 0) {
-            fprintf(stderr, "Error creating counter thread %d\n", i + 1);
-            return 1;
-        }
-    }
-
-    // Join the threads
-    for (int i = 0; i < NUM_THREADS; i++) {
-        cethread_join(&threads[i], NULL);
-    }
-
-    // Print the final value of the shared counter
-    printf("Final value of shared_counter: %d\n", shared_counter);
-
-    // Clean up the mutex
-    return 0;
+void cecond_destroy(cecond_t *cond) {
+    // Nothing special to destroy in this simple implementation
 }
