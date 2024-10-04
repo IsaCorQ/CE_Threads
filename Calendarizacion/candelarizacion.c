@@ -63,61 +63,51 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
     return i; // Devolver el número de barcos leídos
 }
 
-// Función que selecciona el barco con mayor prioridad y que puede avanzar
-Barco* seleccionar_barco_prioridad(Barco barcos[], int num_barcos) {
-    Barco* barco_seleccionado = NULL;
-    int mayor_prioridad = 1000;
-
-    for (int i = 0; i < num_barcos; i++) {
-        // Seleccionar solo barcos que coincidan con la dirección del letrero y que aún tengan tiempo por cruzar
-        if (barcos[i].tiempo_restante > 0 && strcmp(barcos[i].oceano, letrero) == 0) {
-            if (barcos[i].prioridad < mayor_prioridad) {
-                mayor_prioridad = barcos[i].prioridad;
-                barco_seleccionado = &barcos[i];
+// Función para ordenar los barcos por prioridad (menor a mayor)
+void ordenar_barcos_por_prioridad(Barco barcos[], int num_barcos) {
+    for (int i = 0; i < num_barcos - 1; i++) {
+        for (int j = 0; j < num_barcos - i - 1; j++) {
+            if (barcos[j].prioridad > barcos[j + 1].prioridad) {
+                // Intercambiar barcos
+                Barco temp = barcos[j];
+                barcos[j] = barcos[j + 1];
+                barcos[j + 1] = temp;
             }
         }
     }
-    return barco_seleccionado;
 }
 
-// Función que simula el cruce de un barco con algoritmo de prioridad
+// Función que simula el cruce completo de un barco con algoritmo de prioridad
 void* cruzar_canal_prioridad(void* arg) {
     Barco* barco = (Barco*)arg;
 
-    while (barco->tiempo_restante > 0) {
-        pthread_mutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
+    pthread_mutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
 
-        // Esperar hasta que el letrero permita que avance
-        while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1) {
-            pthread_cond_wait(&canal_disponible, &canal_mutex); // Espera hasta que el canal esté disponible
-        }
-
-        barcos_avanzando++; // Indicar que un barco está avanzando
-
-        pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
-
-        // Simulamos el avance del barco por un tiempo quantum
-        int tiempo_a_avanzar = (barco->tiempo_restante > QUANTUM) ? QUANTUM : barco->tiempo_restante;
-        printf("Barco %d (Prioridad: %d, Océano: %s) avanza por %d segundos...\n", barco->id, barco->prioridad, barco->oceano, tiempo_a_avanzar);
-        sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
-
-        // Reducimos el tiempo restante del barco
-        barco->tiempo_restante -= tiempo_a_avanzar;
-
-        pthread_mutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
-        barcos_avanzando--; // El barco terminó su avance, liberar el turno
-
-        if (barco->tiempo_restante <= 0) {
-            printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
-        }
-
-        // Notificar a otros barcos que pueden avanzar
-        pthread_cond_broadcast(&canal_disponible);
-        pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex
+    // Esperar hasta que el letrero permita que avance
+    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1) {
+        pthread_cond_wait(&canal_disponible, &canal_mutex); // Espera hasta que el canal esté disponible
     }
+
+    barcos_avanzando++; // Indicar que un barco está avanzando
+
+    pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+
+    // Simular el cruce del barco completo
+    printf("Barco %d (Prioridad: %d, Océano: %s) está cruzando el canal...\n", barco->id, barco->prioridad, barco->oceano);
+    sleep(barco->tiempo_restante); // Simulamos el tiempo que tarda en cruzar el canal completamente
+
+    pthread_mutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
+    barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
+
+    printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+
+    // Notificar a otros barcos que pueden avanzar
+    pthread_cond_broadcast(&canal_disponible);
+    pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex
 
     pthread_exit(NULL);
 }
+
 void* cruzar_canal_fcfs(void* arg) {
   Barco* barco = (Barco*)arg;
 
@@ -236,7 +226,12 @@ int main() {
             pthread_create(&hilos[i], NULL, cruzar_canal_round_robin, (void*)&barcos[i]);
         }
     } else if (algoritmo == 2) { // Prioridad
+        // Ordenar los barcos por prioridad antes de cruzar
+        ordenar_barcos_por_prioridad(barcos, num_barcos);
+        
+        // Los barcos cruzan en orden de prioridad
         for (int i = 0; i < num_barcos; i++) {
+        	printf("Barco %d (Prioridad: %d, Océano: %s) orden\n", barcos[i].id, barcos[i].prioridad, barcos[i].oceano);
             pthread_create(&hilos[i], NULL, cruzar_canal_prioridad, (void*)&barcos[i]);
         }
     } else {
