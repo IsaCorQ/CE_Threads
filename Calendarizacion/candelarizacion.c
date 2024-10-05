@@ -12,9 +12,8 @@ typedef struct {
     char tipo[10];
     char oceano[10];
     int prioridad;
-    int tiempo_sjf;
+    int tiempo_cruzar;
     int tiempo_maximo;
-    int tiempo_restante;
     int velocidad; // Velocidad del barco según su tipo (longitud/tiempo ejm m/s)
 } Barco;
 
@@ -42,7 +41,7 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
     // Leer cada línea del archivo y cargar los datos
     // Formato: ID Tipo Océano Prioridad Tiempo_SJF Tiempo_Maximo
     while (fgets(buffer, sizeof(buffer), file) && i < max_barcos) {
-        sscanf(buffer, "%d %s %s %d %d %d", &barcos[i].id, barcos[i].tipo, barcos[i].oceano, &barcos[i].prioridad, &barcos[i].tiempo_sjf, &barcos[i].tiempo_maximo);
+        sscanf(buffer, "%d %s %s %d %d", &barcos[i].id, barcos[i].tipo, barcos[i].oceano, &barcos[i].prioridad, &barcos[i].tiempo_maximo);
 
         // Asignar la velocidad según el tipo de barco
         if (strcmp(barcos[i].tipo, "Patrulla") == 0) {
@@ -54,7 +53,7 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
         }
 
         // Calcular el tiempo restante para cruzar el canal
-        barcos[i].tiempo_restante = ancho_canal / barcos[i].velocidad;
+        barcos[i].tiempo_cruzar = ancho_canal / barcos[i].velocidad;
 
         i++;
     }
@@ -67,7 +66,7 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
 void ordenar_barcos_por_sjf(Barco barcos[], int num_barcos) {
     for (int i = 0; i < num_barcos - 1; i++) {
         for (int j = 0; j < num_barcos - i - 1; j++) {
-            if (barcos[j].tiempo_restante > barcos[j + 1].tiempo_restante) {
+            if (barcos[j].tiempo_cruzar > barcos[j + 1].tiempo_cruzar) {
                 // Intercambiar barcos
                 Barco temp = barcos[j];
                 barcos[j] = barcos[j + 1];
@@ -108,8 +107,8 @@ void* cruzar_canal_prioridad_y_sjf(void* arg) {
     pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
 
     // Simular el cruce del barco completo
-    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo total: %d) está cruzando el canal...\n", barco->id, barco->prioridad, barco->oceano, barco->tiempo_restante);
-    sleep(barco->tiempo_restante); // Simulamos el tiempo que tarda en cruzar el canal completamente
+    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+    sleep(barco->tiempo_cruzar); // Simulamos el tiempo que tarda en cruzar el canal completamente
 
     pthread_mutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
@@ -126,7 +125,7 @@ void* cruzar_canal_prioridad_y_sjf(void* arg) {
 void* cruzar_canal_fcfs(void* arg) {
   Barco* barco = (Barco*)arg;
 
-  while (barco->tiempo_restante > 0) {
+  while (barco->tiempo_cruzar > 0) {
     pthread_mutex_lock(&canal_mutex);
     //espera al letrero para avanzar
     while (strcmp(barco->oceano, barco->tipo) != 0) {
@@ -134,8 +133,8 @@ void* cruzar_canal_fcfs(void* arg) {
     }
     //desbloquea el mutex
     pthread_mutex_unlock(&canal_mutex);
-     printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, barco->tiempo_restante);
-    sleep(barco->tiempo_restante);
+     printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, barco->tiempo_cruzar);
+    sleep(barco->tiempo_cruzar);
 
     //Bloqua el mutex
     pthread_mutex_lock(&canal_mutex);
@@ -153,7 +152,7 @@ void* cruzar_canal_fcfs(void* arg) {
 void* cruzar_canal_round_robin(void* arg) {
     Barco* barco = (Barco*)arg;
 
-    while (barco->tiempo_restante > 0) {
+    while (barco->tiempo_cruzar > 0) {
         pthread_mutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
 
         // Esperar hasta que el letrero permita que avance
@@ -166,17 +165,17 @@ void* cruzar_canal_round_robin(void* arg) {
         pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
 
         // Simulamos el avance del barco por un tiempo quantum
-        int tiempo_a_avanzar = (barco->tiempo_restante > QUANTUM) ? QUANTUM : barco->tiempo_restante;
+        int tiempo_a_avanzar = (barco->tiempo_cruzar > QUANTUM) ? QUANTUM : barco->tiempo_cruzar;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
         sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
 
         // Reducimos el tiempo restante del barco
-        barco->tiempo_restante -= tiempo_a_avanzar;
+        barco->tiempo_cruzar -= tiempo_a_avanzar;
 
         pthread_mutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
         barcos_avanzando--; // El barco terminó su avance, liberar el turno
 
-        if (barco->tiempo_restante <= 0) {
+        if (barco->tiempo_cruzar <= 0) {
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
         }
 
@@ -220,7 +219,7 @@ int main() {
     printf("Seleccione el algoritmo de calendarización:\n");
     printf("1. Round Robin (RR)\n");
     printf("2. Prioridad\n");
-    printf("3. SJF (No implementado)\n");
+    printf("3. SJF \n");
     printf("4. FCFS (No implementado)\n");
     printf("5. Tiempo real (No implementado)\n");
     scanf("%d", &algoritmo);
