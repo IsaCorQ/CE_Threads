@@ -64,6 +64,21 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
 }
 
 // Función para ordenar los barcos por prioridad (menor a mayor)
+void ordenar_barcos_por_sjf(Barco barcos[], int num_barcos) {
+    for (int i = 0; i < num_barcos - 1; i++) {
+        for (int j = 0; j < num_barcos - i - 1; j++) {
+            if (barcos[j].tiempo_restante > barcos[j + 1].tiempo_restante) {
+                // Intercambiar barcos
+                Barco temp = barcos[j];
+                barcos[j] = barcos[j + 1];
+                barcos[j + 1] = temp;
+            }
+        }
+    }
+}
+
+
+// Función para ordenar los barcos por prioridad (menor a mayor)
 void ordenar_barcos_por_prioridad(Barco barcos[], int num_barcos) {
     for (int i = 0; i < num_barcos - 1; i++) {
         for (int j = 0; j < num_barcos - i - 1; j++) {
@@ -78,7 +93,7 @@ void ordenar_barcos_por_prioridad(Barco barcos[], int num_barcos) {
 }
 
 // Función que simula el cruce completo de un barco con algoritmo de prioridad
-void* cruzar_canal_prioridad(void* arg) {
+void* cruzar_canal_prioridad_y_sjf(void* arg) {
     Barco* barco = (Barco*)arg;
 
     pthread_mutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
@@ -93,7 +108,7 @@ void* cruzar_canal_prioridad(void* arg) {
     pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
 
     // Simular el cruce del barco completo
-    printf("Barco %d (Prioridad: %d, Océano: %s) está cruzando el canal...\n", barco->id, barco->prioridad, barco->oceano);
+    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo total: %d) está cruzando el canal...\n", barco->id, barco->prioridad, barco->oceano, barco->tiempo_restante);
     sleep(barco->tiempo_restante); // Simulamos el tiempo que tarda en cruzar el canal completamente
 
     pthread_mutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
@@ -116,7 +131,6 @@ void* cruzar_canal_fcfs(void* arg) {
     //espera al letrero para avanzar
     while (strcmp(barco->oceano, barco->tipo) != 0) {
       pthread_cond_wait(&canal_disponible, &canal_mutex);
-
     }
     //desbloquea el mutex
     pthread_mutex_unlock(&canal_mutex);
@@ -134,6 +148,7 @@ void* cruzar_canal_fcfs(void* arg) {
   }
   pthread_exit(NULL);
 }
+
 // Función que simula el cruce de un barco con algoritmo Round Robin
 void* cruzar_canal_round_robin(void* arg) {
     Barco* barco = (Barco*)arg;
@@ -231,10 +246,17 @@ int main() {
         
         // Los barcos cruzan en orden de prioridad
         for (int i = 0; i < num_barcos; i++) {
-        	printf("Barco %d (Prioridad: %d, Océano: %s) orden\n", barcos[i].id, barcos[i].prioridad, barcos[i].oceano);
-            pthread_create(&hilos[i], NULL, cruzar_canal_prioridad, (void*)&barcos[i]);
+            pthread_create(&hilos[i], NULL, cruzar_canal_prioridad_y_sjf, (void*)&barcos[i]);
         }
-    } else {
+    } else if (algoritmo == 3) { // Shortest job first
+        // Ordenar los barcos por prioridad antes de cruzar
+        ordenar_barcos_por_sjf(barcos, num_barcos);
+        
+        // Los barcos cruzan en orden de menor tiempo restante
+        for (int i = 0; i < num_barcos; i++) {
+            pthread_create(&hilos[i], NULL, cruzar_canal_prioridad_y_sjf, (void*)&barcos[i]);
+        } 
+        }else {
         printf("Algoritmo no implementado.\n");
         return 1;
     }
