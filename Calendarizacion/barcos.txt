@@ -1,4 +1,6 @@
 ID Tipo Océano Prioridad Tiempo_Maximo
-1 Normal izquierda 2 10
-2 Pesquero derecha 2 12
+1 Normal izquierda 5 10
+2 Pesquero derecha 5 12
 3 Patrulla izquierda 3 5
+4 Pesquero derecha 2 12
+5 Patrulla izquierda 3 5
