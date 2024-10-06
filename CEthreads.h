@@ -1,48 +1,51 @@
 #ifndef CETHREADS_H
 #define CETHREADS_H
 
-#include <stddef.h>
-#include <stdlib.h>
-#include <sys/types.h>
 #include <stdatomic.h>
+#include <sys/types.h>
 
-// Define the cethread_t structure
+// Stack size for thread creation
+#define STACK_SIZE (1024 * 1024)
+
+// CETHREAD structure definition
 typedef struct {
     pid_t pid;
     void* (*start_routine)(void*);
     void* arg;
     void* stack;
     void* return_value;
-    atomic_int status; 
+    atomic_int status;  // Thread status: 0 = running, 1 = finished
+    int detached;       // Detach flag: 0 = joinable, 1 = detached
 } cethread_t;
 
-// Define the cemutex_t structure
+// Mutex structure definition using atomic_flag
 typedef struct {
     atomic_flag lock;
     atomic_int value;
 } cemutex_t;
 
-// Define the cecond_t structure for condition variables
+// Condition variable structure using atomic_int
 typedef struct {
-    cemutex_t mutex;
-    atomic_int wait_count;
+    atomic_int waiting_threads;
 } cecond_t;
 
-// Function declarations
-int cethread_create(cethread_t *thread, const void *attr, 
-                    void *(*start_routine)(void *), void *arg);
+// CETHREAD Functions
+int cethread_create(cethread_t *thread, const void *attr,
+                    void *(*start_routine) (void *), void *arg);
 int cethread_join(cethread_t *thread, void **retval);
-void cethread_exit(void *retval);
+int cethread_detach(cethread_t *thread);
+void cethread_exit(void* retval);
 
-int cemutex_init(cemutex_t *mutex, const void *attr);
-int cemutex_lock(cemutex_t *mutex);
-int cemutex_unlock(cemutex_t *mutex);
-int cemutex_destroy(cemutex_t *mutex);
+// Mutex Functions
+void cemutex_init(cemutex_t *mutex);
+void cemutex_lock(cemutex_t *mutex);
+void cemutex_unlock(cemutex_t *mutex);
+void cemutex_destroy(cemutex_t *mutex);
 
-int cecond_init(cecond_t *cond, const void *attr);
-int cecond_wait(cecond_t *cond, cemutex_t *mutex);
-int cecond_signal(cecond_t *cond);
-int cecond_broadcast(cecond_t *cond);
-int cecond_destroy(cecond_t *cond);
+// Condition Variable Functions
+void cecond_init(cecond_t *cond);
+void cecond_wait(cecond_t *cond, cemutex_t *mutex);
+void cecond_broadcast(cecond_t *cond);
+void cecond_destroy(cecond_t *cond);
 
 #endif // CETHREADS_H
