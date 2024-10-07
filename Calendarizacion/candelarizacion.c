@@ -23,6 +23,8 @@ typedef struct {
 char letrero[10] = "izquierda"; // Letrero inicial
 int barcos_avanzando = 0; // Barcos que están avanzando
 int barcos_cruzando = 0; // Barcos que están avanzando
+int barcos_terminados = 0; //numero de barcos que finalizaron el recorrido
+int W = 0; //variable que controla el numero de barcos en el canal equidad
 int ancho_canal = 0; // Ancho del canal definido por el usuario
 pthread_mutex_t canal_mutex; // Mutex para proteger el acceso al canal
 pthread_cond_t canal_disponible; // Condición para indicar cuándo el canal está disponible
@@ -355,6 +357,7 @@ void* cruzar_canal_tiempo_real(void* arg) {
         if (barco->tiempo_cruzar == 0) {
             printf("Barco %d ha cruzado completamente el canal.\n", barco->id);
             barco->cruzo = 1; // Marcar el barco como que ya cruzó
+            barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
             barcos_cruzando = 0;
         }
 
@@ -399,6 +402,7 @@ void* cruzar_canal_prioridad(void* arg) {
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     barco->cruzo = 1; // Actualizar el estado del barco
 
     // Actualizar las prioridades después de que el barco haya cruzado
@@ -442,6 +446,7 @@ void* cruzar_canal_fcfs(void* arg) {
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
     barco->cruzo = 1; // Actualizar el estado del barco
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     setear_fcfs();
     // Notificar a otros barcos que pueden avanzar
     pthread_cond_broadcast(&canal_disponible);
@@ -480,6 +485,7 @@ void* cruzar_canal_sjf(void* arg) {
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
     barco->cruzo = 1; // Actualizar el estado del barco
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
 
     // Actualizar las prioridades después de que el barco haya cruzado
     setear_sjf();
@@ -533,6 +539,7 @@ void* cruzar_canal_round_robin(void* arg) {
 
         if (barco->tiempo_cruzar <= 0) {
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+            barcos_terminados++; //agrega a la variable que el barco finalizó su recorrido
             barco->cruzo = 1;
             barcos_cruzando--;
         }
@@ -564,7 +571,20 @@ void cambiar_letrero() {
     }
     pthread_mutex_unlock(&canal_mutex); // Desbloquear el mutex
 }
+void cambiar_letrero_equidad(){
+  pthread_mutex_lock(&canal_mutex);
+  if (barcos_avanzando == 0 && barcos_cruzando == 0 && barcos_terminados == W) { //
+    if (strcmp(letrero, "izquierda") == 0) {
+      strcpy(letrero, "derecha");
+      barcos_terminados = 0;
+      printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
+    } else{
+      strcpy(letrero, "izquierda");
+    }
 
+  }
+   pthread_mutex_unlock(&canal_mutex);
+  }
 int main() {
     pthread_t hilos[MAX_BARCOS]; // Arreglo de hilos
     int hilo_index = 0; // Índice para el arreglo de hilos
