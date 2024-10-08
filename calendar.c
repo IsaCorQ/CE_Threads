@@ -10,6 +10,7 @@
 
 #define QUANTUM 2 // Tiempo de quantum para el Round Robin
 #define MAX_BARCOS 100
+#define MAX_LINE_LENGTH 100
 
 // Estructura para los barcos (hilos)
 typedef struct {
@@ -36,6 +37,37 @@ int num_barcos;
 
 int id_barco_prioridad_der = -1; //ids de los barcos con mayores prioridades a cada lado independientemente del algoritmo
 int id_barco_prioridad_izq = -1;
+
+
+int barcos_izq = 0;
+int barcos_der = 0;
+
+// Function to count boats in the left and right oceans
+void barcos_izq_der(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening file");
+        return;
+    }
+
+    char line[MAX_LINE_LENGTH];
+
+    while (fgets(line, sizeof(line), file)) {
+        char *token = strtok(line, " ");
+        token = strtok(NULL, " "); 
+        token = strtok(NULL, " "); 
+        
+        if (token != NULL) {
+            if (strstr(token, "izquierda") != NULL) {
+                barcos_izq++;
+            } else if (strstr(token, "derecha") != NULL) {
+                barcos_der++;
+            }
+        }
+    }
+
+    fclose(file);
+}
 
 // Función para leer el archivo de texto
 int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
@@ -577,6 +609,10 @@ int main() {
         perror("Error opening serial port");
         return 1;
     }
+
+    barcos_izq_der("barcos.txt");
+    printf("Number of boats in the left ocean: %d\n", barcos_izq);
+    printf("Number of boats in the right ocean: %d\n", barcos_der);
 
     struct termios tty;
     tcgetattr(serial_port, &tty);
