@@ -1,0 +1,2 @@
+Algoritmo Control ValoControl
+FCFS Tico 0

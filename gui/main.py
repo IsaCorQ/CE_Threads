@@ -1,8 +1,7 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 from PIL import Image, ImageTk
 import os
-
 
 class BoatSimulator:
     def __init__(self, root):
@@ -10,11 +9,9 @@ class BoatSimulator:
         self.root.title("Boat Traffic Simulator")
 
         # Variables
-        self.velocidad = tk.StringVar(value="1")
         self.algoritmo = tk.StringVar()
         self.control = tk.StringVar()
         self.equidad = tk.StringVar(value="1")
-        self.letrero_direccion = tk.StringVar()
 
         self.barcos_izquierda = {
             "Normales": tk.StringVar(value="0"),
@@ -49,10 +46,6 @@ class BoatSimulator:
         self.control.trace('w', self.on_control_change)
 
     def create_ui_elements(self):
-        # Velocidad
-        ttk.Label(self.frame_izquierdo, text="Velocidad").pack()
-        ttk.Entry(self.frame_izquierdo, textvariable=self.velocidad).pack()
-
         # Selección de Barcos
         ttk.Label(self.frame_izquierdo, text="Selección de Barcos:").pack(pady=(10, 0))
 
@@ -98,13 +91,6 @@ class BoatSimulator:
         ttk.Label(self.equidad_frame, text="Valor de Equidad").pack()
         ttk.Entry(self.equidad_frame, textvariable=self.equidad).pack()
 
-        # Letrero frame
-        self.letrero_frame = ttk.Frame(self.frame_izquierdo)
-        letrero_options = ["Izquierda", "Derecha"]
-        self.letrero_direccion.set(letrero_options[0])
-        ttk.OptionMenu(self.letrero_frame, self.letrero_direccion,
-                       self.letrero_direccion.get(), *letrero_options).pack()
-
         # Buttons
         ttk.Button(self.frame_izquierdo, text="Guardar",
                    command=self.guardar_datos).pack(pady=5)
@@ -131,17 +117,13 @@ class BoatSimulator:
         self.canvas.create_rectangle(10, 610, 440, 690, outline='orange', width=2, tags="left_parking")
         self.canvas.create_rectangle(460, 610, 890, 690, outline='green', width=2, tags="right_parking")
 
-
     def on_control_change(self, *args):
         # Hide all frames first
         self.equidad_frame.pack_forget()
-        self.letrero_frame.pack_forget()
 
         # Show appropriate frame based on selection
         if self.control.get() == "Equidad":
             self.equidad_frame.pack()
-        elif self.control.get() == "Letrero":
-            self.letrero_frame.pack()
 
     def load_boat_images(self):
         images = {}
@@ -208,6 +190,17 @@ class BoatSimulator:
                 continue
 
     def start_animation(self):
+        # Check if there's at least one boat in barcos.txt
+        try:
+            with open('barcos.txt', 'r') as f:
+                lines = f.readlines()
+                if len(lines) <= 1:  # Only header or empty file
+                    messagebox.showerror("Error", "Debe haber al menos un barco en barcos.txt para iniciar la simulación.")
+                    return
+        except FileNotFoundError:
+            messagebox.showerror("Error", "El archivo barcos.txt no existe. Guarde los datos primero.")
+            return
+
         if self.animation_running:
             return
 
@@ -265,8 +258,6 @@ class BoatSimulator:
 
     def guardar_datos(self):
         try:
-            velocidad = self.validate_numeric_input(self.velocidad.get(), "Velocidad")
-
             barcos_data = []
 
             # Process boats
@@ -286,16 +277,45 @@ class BoatSimulator:
                 messagebox.showwarning("Advertencia", "No hay barcos para guardar")
                 return
 
-            # Save data to file
-            next_id = self.get_next_id()
-
-            with open('barcos.txt', 'a') as f:
+            # Save data to barcos.txt
+            with open('barcos.txt', 'w') as f:
+                f.write("ID Tipo Oceano Prioridad Tiempo_SJF Tiempo_Maximo\n")
+                id_counter = 1
                 for direccion, tipo, cantidad in barcos_data:
                     for _ in range(cantidad):
-                        f.write(f"{next_id} {tipo} {direccion} 1 {velocidad}\n")
-                        next_id += 1
+                        prioridad = self.get_validated_user_input(
+                            f"Ingrese la prioridad para el barco {tipo} {id_counter}:")
+                        tiempo_sjf = self.get_validated_user_input(
+                            f"Ingrese el Tiempo SJF para el barco {tipo} {id_counter}:")
+                        tiempo_maximo = self.get_validated_user_input(
+                            f"Ingrese el Tiempo Máximo para el barco {tipo} {id_counter}:")
 
-            messagebox.showinfo("Éxito", "Datos guardados correctamente")
+                        if prioridad is None or tiempo_sjf is None or tiempo_maximo is None:
+                            messagebox.showerror("Error", "Operación cancelada. No se guardaron los datos.")
+                            return
+
+                        f.write(f"{id_counter} {tipo} {direccion} {prioridad} {tiempo_sjf} {tiempo_maximo}\n")
+                        id_counter += 1
+
+            with open('config.txt', 'w') as f:
+                f.write("Algoritmo Control ValoControl\n")
+                valor_control = "0"
+                if self.control.get() == "Equidad":
+                    valor_control = self.equidad.get()
+
+                # Convert algorithm name to initials
+                algoritmo_initials = {
+                    "Round Robin": "RR",
+                    "Prioridad": "P",
+                    "Shortest Job First": "SJF",
+                    "First Come First Serve": "FCFS",
+                    "Tiempo Real": "TR"
+                }
+                algoritmo_saved = algoritmo_initials.get(self.algoritmo.get(), self.algoritmo.get())
+
+                f.write(f"{algoritmo_saved} {self.control.get()} {valor_control}\n")
+
+            messagebox.showinfo("Éxito", "Datos guardados correctamente en barcos.txt y config.txt")
 
             # Update boat display
             self.display_boats()
@@ -303,19 +323,18 @@ class BoatSimulator:
         except Exception as e:
             messagebox.showerror("Error", f"Error al guardar datos: {str(e)}")
 
-    def get_next_id(self):
-        next_id = 1
-        try:
-            with open('barcos.txt', 'r') as f:
-                for line in f:
-                    try:
-                        id_num = int(line.split()[0])
-                        next_id = max(next_id, id_num + 1)
-                    except (ValueError, IndexError):
-                        continue
-        except FileNotFoundError:
-            pass
-        return next_id
+    def get_validated_user_input(self, prompt):
+        while True:
+            value = simpledialog.askstring("Input", prompt, parent=self.root)
+            if value is None:  # User cancelled
+                return None
+            try:
+                num = int(value)
+                if num < 0:
+                    raise ValueError
+                return num
+            except ValueError:
+                messagebox.showerror("Error", "Por favor, ingrese un número entero no negativo.")
 
     def validate_numeric_input(self, value, field_name):
         try:
