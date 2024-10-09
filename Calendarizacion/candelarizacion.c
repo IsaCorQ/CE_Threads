@@ -6,6 +6,7 @@
 
 #define QUANTUM 2 // Tiempo de quantum para el Round Robin
 #define MAX_BARCOS 100
+#define MAX_LINE_LENGTH 100
 
 // Estructura para los barcos (hilos)
 typedef struct {
@@ -36,6 +37,35 @@ int id_barco_prioridad_der = -1; //ids de los barcos con mayores prioridades a c
 int id_barco_prioridad_izq = -1;
 
 
+int barcos_izq = 0;
+int barcos_der = 0;
+
+// Function to count boats in the left and right oceans
+void barcos_izq_der(const char *filename) {
+    FILE *file = fopen(filename, "r");
+    if (file == NULL) {
+        perror("Error opening file");
+        return;
+    }
+
+    char line[MAX_LINE_LENGTH];
+
+    while (fgets(line, sizeof(line), file)) {
+        char *token = strtok(line, " ");
+        token = strtok(NULL, " ");
+        token = strtok(NULL, " ");
+
+        if (token != NULL) {
+            if (strstr(token, "izquierda") != NULL) {
+                barcos_izq++;
+            } else if (strstr(token, "derecha") != NULL) {
+                barcos_der++;
+            }
+        }
+    }
+
+    fclose(file);
+}
 // Función para leer el archivo de texto
 int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
     FILE* file = fopen(archivo, "r");
@@ -573,16 +603,19 @@ void cambiar_letrero() {
 }
 void cambiar_letrero_equidad(){
   pthread_mutex_lock(&canal_mutex);
-  if (barcos_avanzando == 0 && barcos_cruzando == 0 && barcos_terminados == W) { //
-    if (strcmp(letrero, "izquierda") == 0) {
-      strcpy(letrero, "derecha");
-      barcos_terminados = 0;
-      printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
-    } else{
-      strcpy(letrero, "izquierda");
-    }
-
-  }
+  if (barcos_avanzando == 0 && barcos_cruzando == 0) { //revisa si no hay barcos cruzando
+    if (barcos_terminados == W || barcos_izq == 0 && strcmp(letrero, "izquierda") == 0) {
+          strcpy(letrero, "derecha");
+          barcos_terminados = 0;
+          printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
+        } else {
+          if (barcos_terminados == W || barcos_der == 0 && strcmp(letrero, "derecha") == 0) {
+            strcpy(letrero, "izquierda");
+            barcos_terminados = 0;
+            printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
+          }
+        }
+      }
    pthread_mutex_unlock(&canal_mutex);
   }
 int main() {
