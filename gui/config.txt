@@ -1,2 +1,2 @@
 Algoritmo Control ValoControl
-FCFS Tico 0
+RR Letrero 0

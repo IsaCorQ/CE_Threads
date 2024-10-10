@@ -206,7 +206,7 @@ int main() {
     printf("Ingrese el ancho del canal (en unidades de longitud): ");
     scanf("%d", &ancho_canal);
 
-    int num_barcos = leer_barcos("barcos.txt", barcos, 10); // Leer los barcos desde el archivo
+    int num_barcos = leer_barcos("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/barcos.txt", barcos, 10); // Leer los barcos desde el archivo
 
     if (num_barcos < 0) {
         return 1; // Error al leer el archivo

@@ -255,7 +255,7 @@ class BoatSimulator:
             self.root.after(50, self.animate_boats)
         else:
             self.animation_running = False
-
+    
     def guardar_datos(self):
         try:
             barcos_data = []
