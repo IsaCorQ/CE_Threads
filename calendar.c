@@ -28,6 +28,7 @@ int barcos_cruzando = 0; // Barcos que están avanzando
 int barcos_terminados = 0; //numero de barcos que finalizaron el recorrido
 int W = 0; //variable que controla el numero de barcos en el canal equidad
 int ancho_canal = 0; // Ancho del canal definido por el usuario
+int canal = 0;
 cemutex_t canal_mutex; // Mutex para proteger el acceso al canal
 cecond_t canal_disponible; // Condición para indicar cuándo el canal está disponible
 
@@ -394,6 +395,7 @@ void* cruzar_canal_tiempo_real(void* arg) {
 
         // Actualizar las prioridades dinámicamente después de cada segundo
         setear_tiempo_real();
+        sleep(1);
 
         // Notificar a los demás barcos que el canal está disponible
         cecond_broadcast(&canal_disponible);
@@ -438,6 +440,7 @@ void* cruzar_canal_prioridad(void* arg) {
 
     // Actualizar las prioridades después de que el barco haya cruzado
     setear_prioridad();
+    sleep(1);
 
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
@@ -479,6 +482,7 @@ void* cruzar_canal_fcfs(void* arg) {
     barco->cruzo = 1; // Actualizar el estado del barco
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     setear_fcfs();
+    sleep(1);
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
     cemutex_unlock(&canal_mutex); // Desbloquear el mutex
@@ -520,6 +524,7 @@ void* cruzar_canal_sjf(void* arg) {
 
     // Actualizar las prioridades después de que el barco haya cruzado
     setear_sjf();
+    sleep(1);
 
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
@@ -576,6 +581,7 @@ void* cruzar_canal_round_robin(void* arg) {
         }
         
         setear_round_robin();
+        sleep(1);
         // Notificar a otro barco del mismo lado que puede avanzar
         cecond_broadcast(&canal_disponible);
 
@@ -604,22 +610,20 @@ void cambiar_letrero() {
 }
 void cambiar_letrero_equidad(){
   cemutex_lock(&canal_mutex);
-  printf("equidad\n");
   printf("%d, %d \n", barcos_avanzando, barcos_cruzando);
   if (barcos_avanzando == 0 && barcos_cruzando == 0) { //revisa si no hay barcos cruzando
-    printf("primer if\n");
     if ((barcos_terminados == W || barcos_izq == 0) && strcmp(letrero, "izquierda") == 0) { //revisa el letrero y si ya pasaron los barcos W o no  hay mas
           strcpy(letrero, "derecha");
           printf("Der\n");
           printf("%d", barcos_terminados);
+          barcos_izq--;
           printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
         } else if ((barcos_terminados == W || barcos_der == 0) && strcmp(letrero, "derecha") == 0) {
             strcpy(letrero, "izquierda");
             printf("Izq\n");
             printf("%d", barcos_terminados);
+            barcos_der--;
             printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
-        } else {
-            printf("Error");
         }
       }
    cemutex_unlock(&canal_mutex);
@@ -651,7 +655,6 @@ int main() {
         printf("Control de flujo: Equidad\n");
         printf("Indique el valor de W:\n");
         scanf("%d", &W);
-        cambiar_letrero_equidad();
     } else if (canal == 2){
         printf("No implementado\n");
     } else if (canal == 3){
@@ -688,6 +691,10 @@ int main() {
         setear_tiempo_real();
     }
 
+    if (canal == 1){
+            printf("uwu\n");
+            cambiar_letrero_equidad();
+    }
     // Crear los hilos (barcos) que cruzarán el canal dependiendo del algoritmo seleccionado
 	for (int i = 0; i < num_barcos && hilo_index < MAX_BARCOS; i++) {
 	    if (algoritmo == 1) { // Round Robin
