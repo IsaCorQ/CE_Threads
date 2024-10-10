@@ -604,17 +604,19 @@ void cambiar_letrero() {
 }
 void cambiar_letrero_equidad(){
   cemutex_lock(&canal_mutex);
-  printf("equidad");
+  printf("equidad\n");
+  printf("%d, %d \n", barcos_avanzando, barcos_cruzando);
   if (barcos_avanzando == 0 && barcos_cruzando == 0) { //revisa si no hay barcos cruzando
+    printf("primer if\n");
     if ((barcos_terminados == W || barcos_izq == 0) && strcmp(letrero, "izquierda") == 0) { //revisa el letrero y si ya pasaron los barcos W o no  hay mas
           strcpy(letrero, "derecha");
-          printf("Der");
-          barcos_terminados = 0;
+          printf("Der\n");
+          printf("%d", barcos_terminados);
           printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
         } else if ((barcos_terminados == W || barcos_der == 0) && strcmp(letrero, "derecha") == 0) {
             strcpy(letrero, "izquierda");
-            barcos_terminados = 0;
-            printf("Izq");
+            printf("Izq\n");
+            printf("%d", barcos_terminados);
             printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
         } else {
             printf("Error");
@@ -624,8 +626,8 @@ void cambiar_letrero_equidad(){
 }
 
 int main() {
-  int flag = 1;
-  cethread_t hilos[MAX_BARCOS]; // Arreglo de hilos
+    int flag = 1;
+    cethread_t hilos[MAX_BARCOS]; // Arreglo de hilos
     int hilo_index = 0; // Índice para el arreglo de hilos
 
     // Definir el ancho del canal
@@ -636,6 +638,24 @@ int main() {
 
     if (num_barcos < 0) {
         return 1; // Error al leer el archivo
+    }
+
+    int canal;
+    printf("Seleccione el tipo de control de flujo\n");
+    printf("1. Equidad\n");
+    printf("2. Letrero\n");
+    printf("3. Tico\n");
+    scanf("%d", &canal);
+
+    if (canal == 1){
+        printf("Control de flujo: Equidad\n");
+        printf("Indique el valor de W:\n");
+        scanf("%d", &W);
+        cambiar_letrero_equidad();
+    } else if (canal == 2){
+        printf("No implementado\n");
+    } else if (canal == 3){
+        printf("Control de flujo : Tico\n");
     }
 
     int algoritmo;
@@ -698,19 +718,10 @@ int main() {
 	    hilo_index++;
 	}
 
-    // Variables para monitorear el tiempo para cambiar el letrero
+
     time_t ultimo_cambio = time(NULL);
 
-    int canal;
-    printf("Seleccione el tipo de canal\n");
-    printf("1. Equidad\n");
-    printf("2. Letrero\n");
-    printf("3. Tico\n");
-    scanf("%d", &canal);
-
-    if(canal == 3) {
-      printf("Tipo de canal: Tico \n");
-      while (flag) {
+    while (1) {
         sleep(1); // Intervalo corto para permitir la detección oportuna de cambios
 
         time_t ahora = time(NULL);
@@ -785,80 +796,18 @@ int main() {
         }
         cemutex_unlock(&canal_mutex);
         if (todos_cruzaron) {
-            flag = 0;
+            break;
         }
-
+        
     }
-    printf("Todos los barcos han cruzado el canal.\n");
-    return 0;
-    }
-    if (canal == 2){
-      printf("Tipo de canal: Equidad \n");
-    while (flag){
-	    time_t ahora = time(NULL);
-	    sleep(1);
-	    if(barcos_izq == 0 && barcos_der == 0){
-		    flag = 0;
-	    }
-	    cambiar_letrero_equidad();
-	    static time_t ultimo_actualizacion = 0;
-            if (difftime(ahora, ultimo_actualizacion) >= 5.0) {
-                cemutex_lock(&canal_mutex); // Bloquear el mutex para proteger el acceso a los barcos
 
-                int nuevo_num_barcos = actualizar_barcos("barcos.txt", barcos, num_barcos);
-                if (nuevo_num_barcos < 0) {
-                    cemutex_unlock(&canal_mutex);
-                    continue; // Error al actualizar, intentar de nuevo en el próximo ciclo
-            }
-	    for (int i = num_barcos; i < nuevo_num_barcos && hilo_index < MAX_BARCOS; i++) {
-	        if (barcos[i].cruzo == 0) { // Solo crear hilos para barcos que no han cruzado
-		    if (algoritmo == 1) { // Round Robin
-		        if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_round_robin, (void*)&barcos[i]) != 0) {
-		            perror("Error al crear el hilo Round Robin para nuevo barco");
-		            continue;
-		        }
-		    } else if (algoritmo == 2) { // Prioridad
-		         setear_prioridad();
-		        if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_prioridad, (void*)&barcos[i]) != 0) {
-		            perror("Error al crear el hilo Prioridad para nuevo barco");
-		            continue;
-		        }
-		    } else if (algoritmo == 3) { // SJF
-		         setear_sjf();
-		        if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_sjf, (void*)&barcos[i]) != 0) {
-		            perror("Error al crear el hilo SJF para nuevo barco");
-		            continue;
-		        }
-		    } else if (algoritmo == 4) { // FCFS
-		         setear_fcfs();
-		        if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_fcfs, (void*)&barcos[i]) != 0) {
-		            perror("Error al crear el hilo FCFS para nuevo barco");
-		            continue;
-		        }
-		    } else if (algoritmo == 5) { // Tiempo Real
-		         setear_tiempo_real();
-		        if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_tiempo_real, (void*)&barcos[i]) != 0) {
-		            perror("Error al crear el hilo Tiempo Real para nuevo barco");
-		            continue;
-		        }
-		    }
-		    cethread_detach(&hilos[hilo_index]); // Desvincular el hilo
-		    printf("Hilo creado para el nuevo barco ID=%d\n", barcos[i].id);
-		    hilo_index++;
-	        }
-	    }
-            num_barcos = nuevo_num_barcos; // Actualizar el número de barcos
-            ultimo_actualizacion = ahora;
-
-            cemutex_unlock(&canal_mutex); // Desbloquear el mutex
-        }
-
-}
-    }
     // Nota: En este diseño, el programa está en un bucle infinito.
     // Para terminarlo de manera limpia, podrías implementar señales o condiciones de terminación.
 
     // Destruir el mutex y la condición (Nunca se alcanzará en este diseño)
     cemutex_destroy(&canal_mutex);
     cecond_destroy(&canal_disponible);
+
+    printf("Todos los barcos han cruzado el canal.\n");
+    return 0;
 }
