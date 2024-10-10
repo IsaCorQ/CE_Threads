@@ -4,8 +4,13 @@
 #include <string.h>
 #include <unistd.h>
 #include "CEthreads.h"
+#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <fcntl.h>
 
 #define QUANTUM 2 // Tiempo de quantum para el Round Robin
+#define SHM_KEY 1234
+#define MAX_BOATS 100
 
 // Estructura para los barcos (hilos)
 typedef struct {
@@ -18,6 +23,17 @@ typedef struct {
     int tiempo_restante;
     int velocidad; // Velocidad del barco según su tipo (longitud/tiempo ejm m/s)
 } Barco;
+
+typedef struct {
+    Barco boats[MAX_BOATS];
+    int num_boats;
+    int current_boat_id;
+    int simulation_running;
+} SharedData;
+
+SharedData *shared_data;
+int shm_id;
+
 
 // Variables globales para controlar el canal
 char letrero[10] = "izquierda"; // Letrero inicial
@@ -110,6 +126,8 @@ void* cruzar_canal_prioridad(void* arg) {
 
         if (barco->tiempo_restante <= 0) {
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+            shared_data->current_boat_id = barco->id;
+            shared_data->boats[barco->id - 1] = *barco;
         }
 
         // Notificar a otros barcos que pueden avanzar
@@ -131,8 +149,10 @@ void* cruzar_canal_fcfs(void* arg) {
     }
     //desbloquea el mutex
     cemutex_unlock(&canal_mutex);
-     printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, barco->tiempo_restante);
+    printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, barco->tiempo_restante);
     sleep(barco->tiempo_restante);
+    shared_data->current_boat_id = barco->id;
+    shared_data->boats[barco->id - 1] = *barco;
 
     //Bloqua el mutex
     cemutex_lock(&canal_mutex);
@@ -165,6 +185,8 @@ void* cruzar_canal_round_robin(void* arg) {
         int tiempo_a_avanzar = (barco->tiempo_restante > QUANTUM) ? QUANTUM : barco->tiempo_restante;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
         sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
+        shared_data->current_boat_id = barco->id;
+        shared_data->boats[barco->id - 1] = *barco;
 
         // Reducimos el tiempo restante del barco
         barco->tiempo_restante -= tiempo_a_avanzar;
@@ -206,11 +228,41 @@ int main() {
     printf("Ingrese el ancho del canal (en unidades de longitud): ");
     scanf("%d", &ancho_canal);
 
-    int num_barcos = leer_barcos("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/barcos.txt", barcos, 10); // Leer los barcos desde el archivo
+    int num_barcos = leer_barcos("/home/dylanggf/Documents/OS/CE_Threads/gui/barcos.txt", barcos, 10); // Leer los barcos desde el archivo
 
     if (num_barcos < 0) {
         return 1; // Error al leer el archivo
     }
+
+    // Create shared memory segment
+    shm_id = shmget(SHM_KEY, sizeof(SharedData), IPC_CREAT | 0666);
+    if (shm_id == -1) {
+        perror("shmget failed");
+        exit(1);
+    }
+
+    // Attach to shared memory
+    shared_data = (SharedData *)shmat(shm_id, NULL, 0);
+    if (shared_data == (void *)-1) {
+        perror("shmat failed");
+        exit(1);
+    }
+
+    // Initialize shared data
+    shared_data->num_boats = num_barcos;
+    memcpy(shared_data->boats, barcos, num_barcos * sizeof(Barco));
+    shared_data->current_boat_id = -1;
+    shared_data->simulation_running = 1;
+
+    // Create a file to signal that shared memory is ready
+    int fd = open("/tmp/calendar_shm_ready", O_CREAT | O_WRONLY, 0666);
+    if (fd == -1) {
+        perror("open failed");
+        exit(1);
+    }
+    close(fd);
+
+
 
     int algoritmo;
     printf("Seleccione el algoritmo de calendarización:\n");
@@ -244,12 +296,13 @@ int main() {
         printf("Algoritmo no implementado.\n");
         return 1;
     }
+    
 
     // Controlar el cambio de letrero en intervalos definidos
     while (1) {
         sleep(intervalo_letrero); // Esperar el intervalo antes de cambiar el letrero
         cambiar_letrero(); // Cambiar el letrero después del intervalo
-    }
+    }   
 
     // Esperar a que todos los hilos terminen
     for (int i = 0; i < num_barcos; i++) {
@@ -259,6 +312,13 @@ int main() {
     // Destruir el mutex y la condición
     cemutex_destroy(&canal_mutex);
     cecond_destroy(&canal_disponible);
+
+     // When simulation ends
+    shared_data->simulation_running = 0;
+
+    // Remove the signal file
+    unlink("/tmp/calendar_shm_ready");
+
 
     printf("Todos los barcos han cruzado el canal.\n");
     return 0;

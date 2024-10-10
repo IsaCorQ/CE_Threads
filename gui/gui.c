@@ -3,8 +3,33 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <sys/shm.h>
+#include <sys/ipc.h>
+#include <sys/wait.h>
 
+#define SHM_KEY 1234
 #define MAX_BOATS 100
+
+typedef struct {
+    int id;
+    char tipo[10];
+    char oceano[10];
+    int prioridad;
+    int tiempo_sjf;
+    int tiempo_maximo;
+    int tiempo_restante;
+    int velocidad;
+} Barco;
+
+typedef struct {
+    Barco boats[MAX_BOATS];
+    int num_boats;
+    int current_boat_id;
+    int simulation_running;
+} SharedData;
+
+SharedData *shared_data;
+int shm_id;
 
 typedef struct {
     GtkWidget *window;
@@ -119,40 +144,53 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
 static gboolean animate_boats(gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
     gboolean moved = FALSE;
+
+    if (!shared_data->simulation_running) {
+        sim->animation_running = FALSE;
+        return G_SOURCE_REMOVE;
+    }
     
-    for (int i = 0; i < boat_count; i++) {
-        Boat *boat = &displayed_boats[i];
+    for (int i = 0; i < shared_data->num_boats; i++) {
+        Boat *gui_boat = &displayed_boats[i];
+        Barco *sim_boat = &shared_data->boats[i];
         
-        if (strstr(boat->direction, "Izquierda")) {
-            if (boat->y < 350) {
-                boat->y += 5;
-                moved = TRUE;
-            } else if (boat->x < 450) {
-                boat->x += 5;
-                moved = TRUE;
-            } else if (boat->y < 650) {
-                boat->y += 5;
-                moved = TRUE;
-            } else {
-                boat->x = 460 + (boat->x - 10);
-                boat->y = 650;
-                strcpy(boat->direction, "Derecha");
-                moved = TRUE;
+        if (sim_boat->id == shared_data->current_boat_id) {
+            // Update GUI boat position based on simulation boat data
+            if (strcmp(sim_boat->oceano, "izquierda") == 0) {
+                if (gui_boat->y < 350) {
+                    gui_boat->y += 5;
+                    moved = TRUE;
+                } else if (gui_boat->x < 450) {
+                    gui_boat->x += 5;
+                    moved = TRUE;
+                } else if (gui_boat->y < 650) {
+                    gui_boat->y += 5;
+                    moved = TRUE;
+                }
+            } else if (strcmp(sim_boat->oceano, "derecha") == 0) {
+                if (gui_boat->y < 350) {
+                    gui_boat->y += 5;
+                    moved = TRUE;
+                } else if (gui_boat->x > 450) {
+                    gui_boat->x -= 5;
+                    moved = TRUE;
+                } else if (gui_boat->y < 650) {
+                    gui_boat->y += 5;
+                    moved = TRUE;
+                }
             }
-        } else if (strstr(boat->direction, "Derecha")) {
-            if (boat->y < 350) {
-                boat->y += 5;
-                moved = TRUE;
-            } else if (boat->x > 450) {
-                boat->x -= 5;
-                moved = TRUE;
-            } else if (boat->y < 650) {
-                boat->y += 5;
-                moved = TRUE;
-            } else {
-                boat->x = 10 + (boat->x - 460);
-                boat->y = 650;
-                strcpy(boat->direction, "Izquierda");
+            
+            // Check if boat has finished crossing
+            if (sim_boat->tiempo_restante <= 0) {
+                if (strcmp(sim_boat->oceano, "izquierda") == 0) {
+                    gui_boat->x = 460 + (gui_boat->x - 10);
+                    gui_boat->y = 650;
+                    strcpy(gui_boat->direction, "                   ");
+                } else {
+                    gui_boat->x = 10 + (gui_boat->x - 460);
+                    gui_boat->y = 650;
+                    strcpy(gui_boat->direction, "izquierda");
+                }
                 moved = TRUE;
             }
         }
@@ -188,22 +226,35 @@ static void start_animation(GtkWidget *widget, gpointer data) {
         gtk_widget_destroy(dialog);
         return;
     }
-    
-    char line[256];
-    int line_count = 0;
-    while (fgets(line, sizeof(line), f)) {
-        line_count++;
+
+    // Fork and execute calendar.c
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child process
+        execl("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/calendar", "calendar", NULL);
+        perror("execl failed");
+        exit(1);
+    } else if (pid < 0) {
+        perror("fork failed");
+        return;
     }
-    fclose(f);
-    
-    if (line_count <= 1) {
-        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
-            GTK_DIALOG_DESTROY_WITH_PARENT,
-            GTK_MESSAGE_ERROR,
-            GTK_BUTTONS_CLOSE,
-            "Debe haber al menos un barco en barcos.txt para iniciar la simulación.");
-        gtk_dialog_run(GTK_DIALOG(dialog));
-        gtk_widget_destroy(dialog);
+
+    // Parent process
+    // Wait for the shared memory to be created
+    while (access("/tmp/calendar_shm_ready", F_OK) == -1) {
+        usleep(100000);  // Sleep for 100ms
+    }
+
+    // Now try to access the shared memory
+    shm_id = shmget(SHM_KEY, sizeof(SharedData), 0666);
+    if (shm_id == -1) {
+        perror("shmget failed");
+        return;
+    }
+    // Attach to shared memory
+    shared_data = (SharedData *)shmat(shm_id, NULL, 0);
+    if (shared_data == (void *)-1) {
+        perror("shmat failed");
         return;
     }
     
@@ -251,19 +302,19 @@ static void create_ui(BoatSimulator *sim) {
     gtk_box_pack_start(GTK_BOX(boat_box), left_boat_box, FALSE, FALSE, 0);
     
     gtk_box_pack_start(GTK_BOX(left_boat_box), 
-        gtk_label_new("Izquierda"), FALSE, FALSE, 0);
+        gtk_label_new("izquierda"), FALSE, FALSE, 0);
     
     sim->left_normal_entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(sim->left_normal_entry), "0");
     gtk_box_pack_start(GTK_BOX(left_boat_box), 
-        gtk_label_new("Normales"), FALSE, FALSE, 0);
+        gtk_label_new("Normal"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(left_boat_box), 
         sim->left_normal_entry, FALSE, FALSE, 0);
     
     sim->left_fishing_entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(sim->left_fishing_entry), "0");
     gtk_box_pack_start(GTK_BOX(left_boat_box), 
-        gtk_label_new("Pesqueros"), FALSE, FALSE, 0);
+        gtk_label_new("Pesquero"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(left_boat_box), 
         sim->left_fishing_entry, FALSE, FALSE, 0);
     
@@ -279,19 +330,19 @@ static void create_ui(BoatSimulator *sim) {
     gtk_box_pack_start(GTK_BOX(boat_box), right_boat_box, FALSE, FALSE, 0);
     
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
-        gtk_label_new("Derecha"), FALSE, FALSE, 0);
+        gtk_label_new("derecha"), FALSE, FALSE, 0);
     
     sim->right_normal_entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(sim->right_normal_entry), "0");
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
-        gtk_label_new("Normales"), FALSE, FALSE, 0);
+        gtk_label_new("Normal"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
         sim->right_normal_entry, FALSE, FALSE, 0);
     
     sim->right_fishing_entry = gtk_entry_new();
     gtk_entry_set_text(GTK_ENTRY(sim->right_fishing_entry), "0");
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
-        gtk_label_new("Pesqueros"), FALSE, FALSE, 0);
+        gtk_label_new("Pesquero"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
         sim->right_fishing_entry, FALSE, FALSE, 0);
     
@@ -423,12 +474,12 @@ static void save_data(GtkWidget *widget, gpointer data) {
     
     // Process and save boat data
     int id_counter = 1;
-    const char *directions[] = {"Izquierda", "Derecha"};
+    const char *directions[] = {"izquierda", "derecha"};
     GtkWidget *entries[][3] = {
         {sim->left_normal_entry, sim->left_fishing_entry, sim->left_patrol_entry},
         {sim->right_normal_entry, sim->right_fishing_entry, sim->right_patrol_entry}
     };
-    const char *types[] = {"Normales", "Pesqueros", "Patrulla"};
+    const char *types[] = {"Normal", "Pesquero", "Patrulla"};
     
     // Calcular posiciones iniciales y offsets
     int left_x = 20;
@@ -483,9 +534,9 @@ static void save_data(GtkWidget *widget, gpointer data) {
                 strcpy(boat->type, types[type]);
                 strcpy(boat->direction, directions[dir]);
                 
-                if (strcmp(types[type], "Normales") == 0)
+                if (strcmp(types[type], "Normal") == 0)
                     boat->pixbuf = sim->normal_boat_pixbuf;
-                else if (strcmp(types[type], "Pesqueros") == 0)
+                else if (strcmp(types[type], "Pesquero") == 0)
                     boat->pixbuf = sim->fishing_boat_pixbuf;
                 else
                     boat->pixbuf = sim->patrol_boat_pixbuf;
@@ -541,6 +592,14 @@ int main(int argc, char *argv[]) {
     
     gtk_widget_show_all(sim.window);
     gtk_main();
+
+    // Wait for child process to finish
+    wait(NULL);
+    
+    // Detach from shared memory
+    if (shared_data != NULL) {
+        shmdt(shared_data);
+    }
     
     return 0;
 }    
