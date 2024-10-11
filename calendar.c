@@ -463,7 +463,8 @@ void* cruzar_canal_fcfs(void* arg) {
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
@@ -503,7 +504,8 @@ void* cruzar_canal_sjf(void* arg) {
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
