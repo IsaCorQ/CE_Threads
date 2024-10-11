@@ -3,33 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include <sys/shm.h>
-#include <sys/ipc.h>
-#include <sys/wait.h>
+#include "calendar.h"
 
-#define SHM_KEY 1234
 #define MAX_BOATS 100
-
-typedef struct {
-    int id;
-    char tipo[10];
-    char oceano[10];
-    int prioridad;
-    int tiempo_sjf;
-    int tiempo_maximo;
-    int tiempo_restante;
-    int velocidad;
-} Barco;
-
-typedef struct {
-    Barco boats[MAX_BOATS];
-    int num_boats;
-    int current_boat_id;
-    int simulation_running;
-} SharedData;
-
-SharedData *shared_data;
-int shm_id;
 
 typedef struct {
     GtkWidget *window;
@@ -58,6 +34,9 @@ typedef struct {
     
     // Background image
     GdkPixbuf *ocean_pixbuf;
+
+    Barco *barcos;
+    int num_barcos;
 } BoatSimulator;
 
 typedef struct {
@@ -80,6 +59,11 @@ static void save_data(GtkWidget *widget, gpointer data);
 
 static Boat displayed_boats[MAX_BOATS];
 static int boat_count = 0;
+
+// Añadir estas declaraciones de funciones del calendar.c
+void inicializar_simulacion(const char* archivo_barcos, int ancho_canal);
+void run_calendar(int algoritmo, int intervalo_letrero);
+
 
 static void load_boat_images(BoatSimulator *sim) {
     // Load boat images
@@ -139,74 +123,80 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
             cairo_paint(cr);
         }
     }
+
+    for (int i = 0; i < sim->num_barcos; i++) {
+        Barco *boat = &sim->barcos[i];
+        GdkPixbuf *pixbuf;
+        
+        if (strcmp(boat->tipo, "Normal") == 0)
+            pixbuf = sim->normal_boat_pixbuf;
+        else if (strcmp(boat->tipo, "Pesquero") == 0)
+            pixbuf = sim->fishing_boat_pixbuf;
+        else
+            pixbuf = sim->patrol_boat_pixbuf;
+        
+        // Calcula la posición x basada en el tiempo restante
+        int x = (strcmp(boat->oceano, "izquierda") == 0) 
+                ? 75 + (450 - 75) * (1 - (float)boat->tiempo_restante / 15)
+                : 450 + (825 - 450) * ((float)boat->tiempo_restante / 15);
+        
+        int y = 75 + (i * 50); // Distribuye los barcos verticalmente
+        
+        gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
+        cairo_paint(cr);
+    }
 }
 
 static gboolean animate_boats(gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
     gboolean moved = FALSE;
-
-    if (!shared_data->simulation_running) {
-        sim->animation_running = FALSE;
-        return G_SOURCE_REMOVE;
-    }
     
-    for (int i = 0; i < shared_data->num_boats; i++) {
-        Boat *gui_boat = &displayed_boats[i];
-        Barco *sim_boat = &shared_data->boats[i];
+    obtener_estado_barcos(sim->barcos, &sim->num_barcos);
+    
+    printf("Depuración: Animando %d barcos\n", sim->num_barcos);
+    
+    for (int i = 0; i < sim->num_barcos; i++) {
+        Barco *boat = &sim->barcos[i];
+
+        printf("Depuración: Barco %d - tiempo_restante: %d, tiempo_a_avanzar: %d\n", 
+               i, boat->tiempo_restante, boat->tiempo_a_avanzar);
         
-        if (sim_boat->id == shared_data->current_boat_id) {
-            // Update GUI boat position based on simulation boat data
-            if (strcmp(sim_boat->oceano, "izquierda") == 0) {
-                if (gui_boat->y < 350) {
-                    gui_boat->y += 5;
-                    moved = TRUE;
-                } else if (gui_boat->x < 450) {
-                    gui_boat->x += 5;
-                    moved = TRUE;
-                } else if (gui_boat->y < 650) {
-                    gui_boat->y += 5;
-                    moved = TRUE;
-                }
-            } else if (strcmp(sim_boat->oceano, "derecha") == 0) {
-                if (gui_boat->y < 350) {
-                    gui_boat->y += 5;
-                    moved = TRUE;
-                } else if (gui_boat->x > 450) {
-                    gui_boat->x -= 5;
-                    moved = TRUE;
-                } else if (gui_boat->y < 650) {
-                    gui_boat->y += 5;
-                    moved = TRUE;
-                }
+        
+        if (boat->tiempo_restante > 0) {
+            // Mover el barco
+            if (strcmp(boat->oceano, "izquierda") == 0) {
+                if (boat->y < 350) boat->y += 5;
+                else if (boat->x < 450) boat->x += 5;
+                else if (boat->y < 650) boat->y += 5;
+            } else { // derecha
+                if (boat->y < 350) boat->y += 5;
+                else if (boat->x > 450) boat->x -= 5;
+                else if (boat->y < 650) boat->y += 5;
             }
             
-            // Check if boat has finished crossing
-            if (sim_boat->tiempo_restante <= 0) {
-                if (strcmp(sim_boat->oceano, "izquierda") == 0) {
-                    gui_boat->x = 460 + (gui_boat->x - 10);
-                    gui_boat->y = 650;
-                    strcpy(gui_boat->direction, "                   ");
-                } else {
-                    gui_boat->x = 10 + (gui_boat->x - 460);
-                    gui_boat->y = 650;
-                    strcpy(gui_boat->direction, "izquierda");
-                }
-                moved = TRUE;
+            boat->tiempo_a_avanzar--;
+            boat->tiempo_restante--;
+            moved = TRUE;
+
+            printf("Depuración: Barco %d movido\n", i);
+        } else if (boat->tiempo_restante <= 0) {
+            // Mover al parqueo
+            if (strcmp(boat->oceano, "izquierda") == 0) {
+                boat->x = 10 + (rand() % 420);
+                boat->y = 610 + (rand() % 70);
+            } else {
+                boat->x = 460 + (rand() % 420);
+                boat->y = 610 + (rand() % 70);
             }
         }
     }
     
     gtk_widget_queue_draw(sim->canvas);
     
-    if (!moved) {
-        sim->animation_running = FALSE;
-        sim->animation_timeout_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    
-    return G_SOURCE_CONTINUE;
+    return moved ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
 }
 
+// Modificar la función start_animation para iniciar la simulación
 static void start_animation(GtkWidget *widget, gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
     
@@ -214,52 +204,38 @@ static void start_animation(GtkWidget *widget, gpointer data) {
         return;
     }
     
-    // Check if barcos.txt exists and has content
-    FILE *f = fopen("barcos.txt", "r");
-    if (!f) {
+    // Asegurarse de que tenemos barcos para animar
+    if (num_barcos == 0) {
+        printf("Depuración: No hay barcos para animar.\n");
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
             GTK_DIALOG_DESTROY_WITH_PARENT,
             GTK_MESSAGE_ERROR,
             GTK_BUTTONS_CLOSE,
-            "El archivo barcos.txt no existe. Guarde los datos primero.");
+            "No hay barcos para animar. Asegúrese de que se han cargado los datos.");
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
         return;
     }
-
-    // Fork and execute calendar.c
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child process
-        execl("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/calendar", "calendar", NULL);
-        perror("execl failed");
-        exit(1);
-    } else if (pid < 0) {
-        perror("fork failed");
-        return;
-    }
-
-    // Parent process
-    // Wait for the shared memory to be created
-    while (access("/tmp/calendar_shm_ready", F_OK) == -1) {
-        usleep(100000);  // Sleep for 100ms
-    }
-
-    // Now try to access the shared memory
-    shm_id = shmget(SHM_KEY, sizeof(SharedData), 0666);
-    if (shm_id == -1) {
-        perror("shmget failed");
-        return;
-    }
-    // Attach to shared memory
-    shared_data = (SharedData *)shmat(shm_id, NULL, 0);
-    if (shared_data == (void *)-1) {
-        perror("shmat failed");
-        return;
-    }
     
+    sim->barcos = barcos;
+    sim->num_barcos = num_barcos;
+
+    printf("Depuración: Número de barcos en start_animation: %d\n", sim->num_barcos);
+    
+    // Obtener el algoritmo seleccionado
+    int algoritmo = 1;
+    
+    // Obtener el intervalo del letrero
+    int intervalo_letrero = 10; // Valor por defecto, puedes añadir un widget para que el usuario lo ingrese
+    
+    // Iniciar la animación
     sim->animation_running = TRUE;
     sim->animation_timeout_id = g_timeout_add(50, animate_boats, sim);
+    
+    
+    // Iniciar la simulación en un hilo separado
+    g_thread_new("calendar_thread", (GThreadFunc)run_calendar, GINT_TO_POINTER(algoritmo));
+
 }
 
 static void control_changed(GtkComboBox *widget, gpointer data) {
@@ -469,7 +445,7 @@ static void save_data(GtkWidget *widget, gpointer data) {
     }
     
     // Write headers
-    fprintf(boats_file, "ID Tipo Oceano Prioridad Tiempo_SJF Tiempo_Maximo\n");
+    fprintf(boats_file, "ID Tipo Océano Prioridad Tiempo_SJF Tiempo_Maximo\n");
     fprintf(config_file, "Algoritmo Control ValoControl\n");
     
     // Process and save boat data
@@ -590,16 +566,11 @@ int main(int argc, char *argv[]) {
     load_boat_images(&sim);
     create_ui(&sim);
     
+    // Inicializar la simulación con valores por defecto
+    inicializar_simulacion("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/barcos.txt", 15);
+    
     gtk_widget_show_all(sim.window);
     gtk_main();
-
-    // Wait for child process to finish
-    wait(NULL);
-    
-    // Detach from shared memory
-    if (shared_data != NULL) {
-        shmdt(shared_data);
-    }
     
     return 0;
-}    
+} 
