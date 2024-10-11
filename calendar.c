@@ -31,6 +31,7 @@ int ancho_canal = 0; // Ancho del canal definido por el usuario
 int canal = 0;
 cemutex_t canal_mutex; // Mutex para proteger el acceso al canal
 cecond_t canal_disponible; // Condición para indicar cuándo el canal está disponible
+int debio_cambiar_letrero = 0;
 
 Barco barcos[MAX_BARCOS]; // Max de 100 barcos
 int num_barcos;
@@ -417,7 +418,8 @@ void* cruzar_canal_prioridad(void* arg) {
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
@@ -603,8 +605,11 @@ void cambiar_letrero() {
         } else {
             strcpy(letrero, "izquierda");
         }
+        debio_cambiar_letrero = 0;
         printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
         cecond_broadcast(&canal_disponible); // Notificar a los hilos del cambio del letrero
+    } else {
+        debio_cambiar_letrero = 1;
     }
     cemutex_unlock(&canal_mutex); // Desbloquear el mutex
 }
@@ -656,7 +661,7 @@ int main() {
         printf("Indique el valor de W:\n");
         scanf("%d", &W);
     } else if (canal == 2){
-        printf("No implementado\n");
+        printf("Control de flujo : Letrero\n");
     } else if (canal == 3){
         printf("Control de flujo : Tico\n");
     }
@@ -681,7 +686,7 @@ int main() {
     // Ordenar los barcos según el algoritmo seleccionado antes de crear los hilos
     if (algoritmo == 1) { // Round Robin
         setear_round_robin();
-        }else if (algoritmo == 2) { // Prioridad
+    }else if (algoritmo == 2) { // Prioridad
         setear_prioridad();
     } else if (algoritmo == 3) { // Shortest Job First
         setear_sjf();
