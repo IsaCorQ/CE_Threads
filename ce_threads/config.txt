@@ -1,2 +1,2 @@
-Algoritmo Control ValoControl
-RR Tico 0
+Algoritmo Control ValoControl AnchoCanal IntervaloLetrero
+RR Letrero 0 50 1

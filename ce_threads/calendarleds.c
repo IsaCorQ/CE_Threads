@@ -8,7 +8,7 @@
 #include <errno.h>
 #include "CEthreads.h"
 
-#define QUANTUM 5 // Tiempo de quantum para el Round Robin
+#define QUANTUM 2 // Tiempo de quantum para el Round Robin
 #define MAX_BARCOS 100
 #define MAX_LINE_LENGTH 100
 
@@ -41,6 +41,8 @@ int id_barco_prioridad_izq = -1;
 
 int barcos_izq = 0;
 int barcos_der = 0;
+char direccion[9];
+int signalSent = 0;
 
 // Function to count boats in the left and right oceans
 void barcos_izq_der(const char *filename) {
@@ -106,52 +108,6 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
 
     fclose(file);
     return i; // Devolver el número de barcos leídos
-}
-
-int leer_config(const char* archivo_config, int* algoritmo, int* valor_control, int* ancho_canal, int* intervalo_letrero) {
-    FILE* file = fopen(archivo_config, "r");
-    if (file == NULL) {
-        perror("No se puede abrir el archivo config.txt");
-        return -1;
-    }
-
-    char buffer[256];
-
-    // Leer la cabecera del archivo (ignorar la primera línea)
-    fgets(buffer, sizeof(buffer), file);
-
-    // Leer la segunda línea que contiene los datos
-    char algoritmo_str[10], control[10];
-    if (fgets(buffer, sizeof(buffer), file)) {
-        sscanf(buffer, "%s %s %d %d %d", algoritmo_str, control, valor_control, ancho_canal, intervalo_letrero);
-
-        // Convertir el algoritmo a un número para manejarlo en el código
-        if (strcmp(algoritmo_str, "RR") == 0) {
-            *algoritmo = 1;
-        } else if (strcmp(algoritmo_str, "Prioridad") == 0) {
-            *algoritmo = 2;
-        } else if (strcmp(algoritmo_str, "SJF") == 0) {
-            *algoritmo = 3;
-        } else if (strcmp(algoritmo_str, "FCFS") == 0) {
-            *algoritmo = 4;
-        } else if (strcmp(algoritmo_str, "Tiempo") == 0) {
-            *algoritmo = 5;
-        } else {
-            printf("Algoritmo no reconocido en config.txt.\n");
-            fclose(file);
-            return -1;
-        }
-
-        // Imprimir los valores de control para debug
-        printf("Algoritmo: %s\n", algoritmo_str);
-        printf("Control: %s\n", control);
-        printf("Valor del Control: %d\n", *valor_control);
-        printf("Ancho del Canal: %d\n", *ancho_canal);
-        printf("Intervalo del Letrero: %d\n", *intervalo_letrero);
-    }
-
-    fclose(file);
-    return 0;
 }
 
 // Función que actualiza la lista de barcos si hay nuevos barcos en el archivo
@@ -405,26 +361,234 @@ void setear_tiempo_real() {
 }
 
 void* cruzar_canal_tiempo_real(void* arg) {
-    
+    Barco* barco = (Barco*)arg;
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
+
+    while (barco->tiempo_cruzar > 0) {
+        cemutex_lock(&canal_mutex); // Bloquear el mutex para controlar el acceso
+
+        // Si el barco actual no tiene la prioridad más alta, esperar
+    // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
+    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
+           (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+
+        cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
+    }
+        // Iniciar el cruce del barco
+        barcos_avanzando++;
+        barcos_cruzando = 1;
+        cemutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+
+        // Simular que el barco avanza un segundo
+        printf("Barco %d (Tiempo máximo: %d, Tiempo restante: %d) está cruzando el canal...\n", 
+               barco->id, barco->tiempo_maximo, barco->tiempo_cruzar);
+
+        strcpy(direccion, barco->oceano);
+        write(serial_port, direccion, 1);
+
+        sleep(1);
+        barco->tiempo_cruzar--; // Reducir el tiempo restante
+
+        // Volver a bloquear el mutex para actualizar el estado
+        cemutex_lock(&canal_mutex);
+        barcos_avanzando--; // El barco libera el control tras un segundo de avance
+
+        if (barco->tiempo_cruzar == 0) {
+            printf("Barco %d ha cruzado completamente el canal.\n", barco->id);
+            barco->cruzo = 1; // Marcar el barco como que ya cruzó
+            barcos_cruzando = 0;
+        }
+
+        // Actualizar las prioridades dinámicamente después de cada segundo
+        setear_tiempo_real();
+
+        // Notificar a los demás barcos que el canal está disponible
+        cecond_broadcast(&canal_disponible);
+        cemutex_unlock(&canal_mutex);
+
+        // Pausar brevemente antes de verificar si sigue teniendo la prioridad
+        sleep(1);
+    }
+
+    cethread_exit(NULL);
 }
 
 // Función que simula el cruce completo de un barco con algoritmo de prioridad
 void* cruzar_canal_prioridad(void* arg) {
-    
+    Barco* barco = (Barco*)arg;
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
+
+    cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
+
+    // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
+    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
+           (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+
+        cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
+    }
+
+    barcos_avanzando++; // Indicar que un barco está avanzando
+
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+
+    // Simular el cruce del barco completo
+    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
+           barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+
+    strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
+
+    sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
+
+    cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
+    barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
+
+    printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    barco->cruzo = 1; // Actualizar el estado del barco
+
+    // Actualizar las prioridades después de que el barco haya cruzado
+    setear_prioridad();
+
+    // Notificar a otros barcos que pueden avanzar
+    cecond_broadcast(&canal_disponible);
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex
+
+    // Esperar un breve momento para simular el cambio de turno
+    sleep(1);
+
+    cethread_exit(NULL);
 }
 
 // Función que simula el cruce completo de un barco con algoritmo de prioridad
 void* cruzar_canal_fcfs(void* arg) {
-    
+    Barco* barco = (Barco*)arg;
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
+
+    cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
+
+    // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
+    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
+           (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+
+        cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
+    }
+
+    barcos_avanzando++; // Indicar que un barco está avanzando
+
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+
+    // Simular el cruce del barco completo
+    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
+           barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+
+    strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
+    sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
+    cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
+    barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
+    if (signalSent == 0){
+        strcpy(direccion, barco->oceano);
+        write(serial_port, direccion, 1);
+        signalSent =1;
+    }
+
+
+    printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    barco->cruzo = 1; // Actualizar el estado del barco
+    setear_fcfs();
+    // Notificar a otros barcos que pueden avanzar
+    cecond_broadcast(&canal_disponible);
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex
+
+    // Esperar un breve momento para simular el cambio de turno
+    sleep(1);
+
+    cethread_exit(NULL);
 }
 
 void* cruzar_canal_sjf(void* arg) {
-   
+    Barco* barco = (Barco*)arg;
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
+
+    cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
+
+    // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
+    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
+           (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+
+        cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
+    }
+
+    barcos_avanzando++; // Indicar que un barco está avanzando
+
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+
+    // Simular el cruce del barco completo
+    printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
+           barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+
+    strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
+
+    sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
+
+    cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
+    barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
+
+    printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    barco->cruzo = 1; // Actualizar el estado del barco
+
+    // Actualizar las prioridades después de que el barco haya cruzado
+    setear_sjf();
+
+    // Notificar a otros barcos que pueden avanzar
+    cecond_broadcast(&canal_disponible);
+    cemutex_unlock(&canal_mutex); // Desbloquear el mutex
+
+    // Esperar un breve momento para simular el cambio de turno
+    sleep(1);
+
+    cethread_exit(NULL);
 }
 
 void* cruzar_canal_round_robin(void* arg) {
     Barco* barco = (Barco*)arg;
     int conto_barco = 0;
+
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
     while (barco->tiempo_cruzar > 0) {
         cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
@@ -449,6 +613,10 @@ void* cruzar_canal_round_robin(void* arg) {
         // Simulamos el avance del barco por un tiempo quantum
         int tiempo_a_avanzar = (barco->tiempo_cruzar > QUANTUM) ? QUANTUM : barco->tiempo_cruzar;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
+        
+        strcpy(direccion, barco->oceano);
+        write(serial_port, direccion, 1);
+
         sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
 
         // Reducimos el tiempo restante del barco
@@ -497,85 +665,98 @@ int main() {
     cethread_t hilos[MAX_BARCOS]; // Arreglo de hilos
     int hilo_index = 0; // Índice para el arreglo de hilos
 
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    if (serial_port < 0) {
+        perror("Error opening serial port");
+        return 1;
+    }
+
     barcos_izq_der("barcos.txt");
     printf("Number of boats in the left ocean: %d\n", barcos_izq);
     printf("Number of boats in the right ocean: %d\n", barcos_der);
 
-    // Variables para almacenar los valores de config.txt
-    int algoritmo, valor_control, intervalo_letrero;
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
-    // Leer el archivo config.txt
-    if (leer_config("config.txt", &algoritmo, &valor_control, &ancho_canal, &intervalo_letrero) < 0) {
-        return 1; // Error al leer config.txt
-    }
+    char resetCommand[2] = "0"; // Reset command
+    write(serial_port, resetCommand, 1); 
 
-    // Leer los barcos desde el archivo barcos.txt
-    num_barcos = leer_barcos("barcos.txt", barcos, MAX_BARCOS);
+    // Definir el ancho del canal
+    printf("Ingrese el ancho del canal (en unidades de longitud): ");
+    scanf("%d", &ancho_canal);
+
+    num_barcos = leer_barcos("barcos.txt", barcos, MAX_BARCOS); // Leer los barcos desde el archivo
+   
+    char input[2];
+    snprintf(input, sizeof(input), "%d", num_barcos); 
+    write(serial_port, input, 1);
+
     if (num_barcos < 0) {
-        return 1; // Error al leer el archivo de barcos
+        return 1; // Error al leer el archivo
     }
 
-    // Imprimir información de los barcos
-    printf("Barcos cargados:\n");
-    for (int i = 0; i < num_barcos; i++) {
-        printf("Barco ID=%d, Tipo=%s, Océano=%s, Prioridad=%d, Tiempo Cruzar=%d\n",
-               barcos[i].id, barcos[i].tipo, barcos[i].oceano, barcos[i].prioridad, barcos[i].tiempo_cruzar);
-    }
+    int algoritmo;
+    printf("Seleccione el algoritmo de calendarización:\n");
+    printf("1. Round Robin (RR)\n");
+    printf("2. Prioridad\n");
+    printf("3. SJF \n");
+    printf("4. FCFS\n");
+    printf("5. Tiempo real\n");
+    scanf("%d", &algoritmo);
 
-    // Imprimir el algoritmo seleccionado
-    printf("Algoritmo seleccionado: ");
-    switch (algoritmo) {
-        case 1: printf("Round Robin\n"); break;
-        case 2: printf("Prioridad\n"); break;
-        case 3: printf("Shortest Job First (SJF)\n"); break;
-        case 4: printf("First Come First Serve (FCFS)\n"); break;
-        case 5: printf("Tiempo Real\n"); break;
-        default: printf("Algoritmo no válido\n"); return 1;
-    }
+    int intervalo_letrero;
+    printf("Ingrese el intervalo de tiempo (segundos) para cambiar el letrero: ");
+    scanf("%d", &intervalo_letrero);
 
     // Inicializar mutex y condición
     cemutex_init(&canal_mutex);
     cecond_init(&canal_disponible);
 
-    // Configurar el algoritmo
-    if (algoritmo == 1) {
+    // Ordenar los barcos según el algoritmo seleccionado antes de crear los hilos
+    if (algoritmo == 1) { // Round Robin
         setear_round_robin();
-    } else if (algoritmo == 2) {
+        }else if (algoritmo == 2) { // Prioridad
         setear_prioridad();
-    } else if (algoritmo == 3) {
+    } else if (algoritmo == 3) { // Shortest Job First
         setear_sjf();
-    } else if (algoritmo == 4) {
+    } else if (algoritmo == 4) { // FCFS
         setear_fcfs();
-    } else if (algoritmo == 5) {
+    } else if (algoritmo == 5) { // Tiempo Maximo
         setear_tiempo_real();
     }
 
-    // Crear los hilos para los barcos
-    for (int i = 0; i < num_barcos && hilo_index < MAX_BARCOS; i++) {
-        if (algoritmo == 1) {
-            if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_round_robin, (void*)&barcos[i]) != 0) {
-                perror("Error al crear el hilo Round Robin");
-            }
-        } else if (algoritmo == 2) {
-            if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_prioridad, (void*)&barcos[i]) != 0) {
-                perror("Error al crear el hilo Prioridad");
-            }
-        } else if (algoritmo == 3) {
-            if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_sjf, (void*)&barcos[i]) != 0) {
-                perror("Error al crear el hilo SJF");
-            }
-        } else if (algoritmo == 4) {
-            if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_fcfs, (void*)&barcos[i]) != 0) {
-                perror("Error al crear el hilo FCFS");
-            }
-        } else if (algoritmo == 5) {
-            if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_tiempo_real, (void*)&barcos[i]) != 0) {
-                perror("Error al crear el hilo Tiempo Real");
-            }
-        }
-        cethread_detach(&hilos[hilo_index]);
-        hilo_index++;
-    }
+    // Crear los hilos (barcos) que cruzarán el canal dependiendo del algoritmo seleccionado
+	for (int i = 0; i < num_barcos && hilo_index < MAX_BARCOS; i++) {
+	    if (algoritmo == 1) { // Round Robin
+		if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_round_robin, (void*)&barcos[i]) != 0) {
+		    perror("Error al crear el hilo Round Robin");
+		}
+	    } else if (algoritmo == 2) { // Prioridad
+		if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_prioridad, (void*)&barcos[i]) != 0) {
+		    perror("Error al crear el hilo Prioridad/SJF");
+		}
+	    } else if (algoritmo == 3) { //SJF
+		if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_sjf, (void*)&barcos[i]) != 0) {
+		    perror("Error al crear el hilo Prioridad/SJF");
+		}
+	    } else if (algoritmo == 4) { //FCFS
+		if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_fcfs, (void*)&barcos[i]) != 0) {
+		    perror("Error al crear el hilo Prioridad/SJF");
+		}
+	    } else if (algoritmo == 5) { //Tiempo Real
+		if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_tiempo_real, (void*)&barcos[i]) != 0) {
+		    perror("Error al crear el hilo Prioridad/SJF");
+		}
+	    } else {
+		printf("Algoritmo no implementado.\n");
+		return 1;
+	    }
+	    cethread_detach(&hilos[hilo_index]); // Desvincular el hilo 
+	    hilo_index++;
+	}
 
     // Variables para monitorear el tiempo para cambiar el letrero
     time_t ultimo_cambio = time(NULL);
@@ -589,21 +770,62 @@ int main() {
             ultimo_cambio = ahora;
         }
 
-        // Actualizar barcos cada 5 segundos
+        // Actualizar barcos cada cierto tiempo (puedes ajustar el intervalo)
+        // Por ejemplo, cada 5 segundos
         static time_t ultimo_actualizacion = 0;
         if (difftime(ahora, ultimo_actualizacion) >= 5.0) {
-            cemutex_lock(&canal_mutex);
+            cemutex_lock(&canal_mutex); // Bloquear el mutex para proteger el acceso a los barcos
 
             int nuevo_num_barcos = actualizar_barcos("barcos.txt", barcos, num_barcos);
-            if (nuevo_num_barcos >= 0) {
-                num_barcos = nuevo_num_barcos;
+            if (nuevo_num_barcos < 0) {
+                cemutex_unlock(&canal_mutex);
+                continue; // Error al actualizar, intentar de nuevo en el próximo ciclo
             }
-            cemutex_unlock(&canal_mutex);
 
+	// Crear hilos para los nuevos barcos
+	for (int i = num_barcos; i < nuevo_num_barcos && hilo_index < MAX_BARCOS; i++) {
+	    if (barcos[i].cruzo == 0) { // Solo crear hilos para barcos que no han cruzado
+		if (algoritmo == 1) { // Round Robin
+		    if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_round_robin, (void*)&barcos[i]) != 0) {
+		        perror("Error al crear el hilo Round Robin para nuevo barco");
+		        continue;
+		    }
+		} else if (algoritmo == 2) { // Prioridad
+		     setear_prioridad();
+		    if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_prioridad, (void*)&barcos[i]) != 0) {
+		        perror("Error al crear el hilo Prioridad para nuevo barco");
+		        continue;
+		    }
+		} else if (algoritmo == 3) { // SJF
+		     setear_sjf();
+		    if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_sjf, (void*)&barcos[i]) != 0) {
+		        perror("Error al crear el hilo SJF para nuevo barco");
+		        continue;
+		    }
+		} else if (algoritmo == 4) { // FCFS
+		     setear_fcfs();
+		    if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_fcfs, (void*)&barcos[i]) != 0) {
+		        perror("Error al crear el hilo FCFS para nuevo barco");
+		        continue;
+		    }
+		} else if (algoritmo == 5) { // Tiempo Real
+		     setear_tiempo_real();
+		    if (cethread_create(&hilos[hilo_index], NULL, cruzar_canal_tiempo_real, (void*)&barcos[i]) != 0) {
+		        perror("Error al crear el hilo Tiempo Real para nuevo barco");
+		        continue;
+		    }
+		}
+		cethread_detach(&hilos[hilo_index]); // Desvincular el hilo
+		printf("Hilo creado para el nuevo barco ID=%d\n", barcos[i].id);
+		hilo_index++;
+	    }
+	}
+            num_barcos = nuevo_num_barcos; // Actualizar el número de barcos
             ultimo_actualizacion = ahora;
+
+            cemutex_unlock(&canal_mutex); // Desbloquear el mutex
         }
 
-        // Verificar si todos los barcos han cruzado
         int todos_cruzaron = 1;
         cemutex_lock(&canal_mutex);
         for (int i = 0; i < num_barcos; i++) {
@@ -614,14 +836,23 @@ int main() {
         }
         cemutex_unlock(&canal_mutex);
         if (todos_cruzaron) {
+            char reset_command[] = "reset";
+            write(serial_port, reset_command, 1);
             break;
         }
+        
     }
 
+    // Nota: En este diseño, el programa está en un bucle infinito.
+    // Para terminarlo de manera limpia, podrías implementar señales o condiciones de terminación.
+
+    // Destruir el mutex y la condición (Nunca se alcanzará en este diseño)
     cemutex_destroy(&canal_mutex);
     cecond_destroy(&canal_disponible);
 
     printf("Todos los barcos han cruzado el canal.\n");
 
+   
+    close(serial_port);
     return 0;
 }

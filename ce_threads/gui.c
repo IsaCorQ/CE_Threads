@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
-#include "calendar.h"
 
 #define MAX_BOATS 100
 
@@ -14,7 +13,7 @@ typedef struct {
     GtkWidget *control_combo;
     GtkWidget *equity_frame;
     GtkWidget *equity_entry;
-    
+
     // Boat count entries
     GtkWidget *left_normal_entry;
     GtkWidget *left_fishing_entry;
@@ -22,22 +21,24 @@ typedef struct {
     GtkWidget *right_normal_entry;
     GtkWidget *right_fishing_entry;
     GtkWidget *right_patrol_entry;
-    
+
     // Animation variables
     gboolean animation_running;
     guint animation_timeout_id;
-    
+
     // Boat images
     GdkPixbuf *normal_boat_pixbuf;
     GdkPixbuf *fishing_boat_pixbuf;
     GdkPixbuf *patrol_boat_pixbuf;
-    
+
     // Background image
     GdkPixbuf *ocean_pixbuf;
 
-    Barco *barcos;
-    int num_barcos;
+    // New entries for canal width and time interval
+    GtkWidget *width_entry;
+    GtkWidget *interval_entry;
 } BoatSimulator;
+
 
 typedef struct {
     int x;
@@ -59,11 +60,6 @@ static void save_data(GtkWidget *widget, gpointer data);
 
 static Boat displayed_boats[MAX_BOATS];
 static int boat_count = 0;
-
-// Añadir estas declaraciones de funciones del calendar.c
-void inicializar_simulacion(const char* archivo_barcos, int ancho_canal);
-void run_calendar(int algoritmo, int intervalo_letrero);
-
 
 static void load_boat_images(BoatSimulator *sim) {
     // Load boat images
@@ -123,80 +119,61 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
             cairo_paint(cr);
         }
     }
-
-    for (int i = 0; i < sim->num_barcos; i++) {
-        Barco *boat = &sim->barcos[i];
-        GdkPixbuf *pixbuf;
-        
-        if (strcmp(boat->tipo, "Normal") == 0)
-            pixbuf = sim->normal_boat_pixbuf;
-        else if (strcmp(boat->tipo, "Pesquero") == 0)
-            pixbuf = sim->fishing_boat_pixbuf;
-        else
-            pixbuf = sim->patrol_boat_pixbuf;
-        
-        // Calcula la posición x basada en el tiempo restante
-        int x = (strcmp(boat->oceano, "izquierda") == 0) 
-                ? 75 + (450 - 75) * (1 - (float)boat->tiempo_restante / 15)
-                : 450 + (825 - 450) * ((float)boat->tiempo_restante / 15);
-        
-        int y = 75 + (i * 50); // Distribuye los barcos verticalmente
-        
-        gdk_cairo_set_source_pixbuf(cr, pixbuf, x, y);
-        cairo_paint(cr);
-    }
 }
 
 static gboolean animate_boats(gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
     gboolean moved = FALSE;
     
-    obtener_estado_barcos(sim->barcos, &sim->num_barcos);
-    
-    printf("Depuración: Animando %d barcos\n", sim->num_barcos);
-    
-    for (int i = 0; i < sim->num_barcos; i++) {
-        Barco *boat = &sim->barcos[i];
-
-        printf("Depuración: Barco %d - tiempo_restante: %d, tiempo_a_avanzar: %d\n", 
-               i, boat->tiempo_restante, boat->tiempo_a_avanzar);
+    for (int i = 0; i < boat_count; i++) {
+        Boat *boat = &displayed_boats[i];
         
-        
-        if (boat->tiempo_restante > 0) {
-            // Mover el barco
-            if (strcmp(boat->oceano, "izquierda") == 0) {
-                if (boat->y < 350) boat->y += 5;
-                else if (boat->x < 450) boat->x += 5;
-                else if (boat->y < 650) boat->y += 5;
-            } else { // derecha
-                if (boat->y < 350) boat->y += 5;
-                else if (boat->x > 450) boat->x -= 5;
-                else if (boat->y < 650) boat->y += 5;
-            }
-            
-            boat->tiempo_a_avanzar--;
-            boat->tiempo_restante--;
-            moved = TRUE;
-
-            printf("Depuración: Barco %d movido\n", i);
-        } else if (boat->tiempo_restante <= 0) {
-            // Mover al parqueo
-            if (strcmp(boat->oceano, "izquierda") == 0) {
-                boat->x = 10 + (rand() % 420);
-                boat->y = 610 + (rand() % 70);
+        if (strstr(boat->direction, "izquierda")) {
+            if (boat->y < 350) {
+                boat->y += 5;
+                moved = TRUE;
+            } else if (boat->x < 450) {
+                boat->x += 5;
+                moved = TRUE;
+            } else if (boat->y < 650) {
+                boat->y += 5;
+                moved = TRUE;
             } else {
-                boat->x = 460 + (rand() % 420);
-                boat->y = 610 + (rand() % 70);
+                boat->x = 460 + (boat->x - 10);
+                boat->y = 650;
+                strcpy(boat->direction, "derecha");
+                moved = TRUE;
+            }
+        } else if (strstr(boat->direction, "derecha")) {
+            if (boat->y < 350) {
+                boat->y += 5;
+                moved = TRUE;
+            } else if (boat->x > 450) {
+                boat->x -= 5;
+                moved = TRUE;
+            } else if (boat->y < 650) {
+                boat->y += 5;
+                moved = TRUE;
+            } else {
+                boat->x = 10 + (boat->x - 460);
+                boat->y = 650;
+                strcpy(boat->direction, "izquierda");
+                moved = TRUE;
             }
         }
     }
     
     gtk_widget_queue_draw(sim->canvas);
     
-    return moved ? G_SOURCE_CONTINUE : G_SOURCE_REMOVE;
+    if (!moved) {
+        sim->animation_running = FALSE;
+        sim->animation_timeout_id = 0;
+        return G_SOURCE_REMOVE;
+    }
+    
+    return G_SOURCE_CONTINUE;
 }
 
-// Modificar la función start_animation para iniciar la simulación
 static void start_animation(GtkWidget *widget, gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
     
@@ -204,38 +181,39 @@ static void start_animation(GtkWidget *widget, gpointer data) {
         return;
     }
     
-    // Asegurarse de que tenemos barcos para animar
-    if (num_barcos == 0) {
-        printf("Depuración: No hay barcos para animar.\n");
+    // Check if barcos.txt exists and has content
+    FILE *f = fopen("barcos.txt", "r");
+    if (!f) {
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
             GTK_DIALOG_DESTROY_WITH_PARENT,
             GTK_MESSAGE_ERROR,
             GTK_BUTTONS_CLOSE,
-            "No hay barcos para animar. Asegúrese de que se han cargado los datos.");
+            "El archivo barcos.txt no existe. Guarde los datos primero.");
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
         return;
     }
     
-    sim->barcos = barcos;
-    sim->num_barcos = num_barcos;
-
-    printf("Depuración: Número de barcos en start_animation: %d\n", sim->num_barcos);
+    char line[256];
+    int line_count = 0;
+    while (fgets(line, sizeof(line), f)) {
+        line_count++;
+    }
+    fclose(f);
     
-    // Obtener el algoritmo seleccionado
-    int algoritmo = 1;
+    if (line_count <= 1) {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
+            GTK_DIALOG_DESTROY_WITH_PARENT,
+            GTK_MESSAGE_ERROR,
+            GTK_BUTTONS_CLOSE,
+            "Debe haber al menos un barco en barcos.txt para iniciar la simulación.");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        return;
+    }
     
-    // Obtener el intervalo del letrero
-    int intervalo_letrero = 10; // Valor por defecto, puedes añadir un widget para que el usuario lo ingrese
-    
-    // Iniciar la animación
     sim->animation_running = TRUE;
     sim->animation_timeout_id = g_timeout_add(50, animate_boats, sim);
-    
-    
-    // Iniciar la simulación en un hilo separado
-    g_thread_new("calendar_thread", (GThreadFunc)run_calendar, GINT_TO_POINTER(algoritmo));
-
 }
 
 static void control_changed(GtkComboBox *widget, gpointer data) {
@@ -328,6 +306,25 @@ static void create_ui(BoatSimulator *sim) {
         gtk_label_new("Patrulla"), FALSE, FALSE, 0);
     gtk_box_pack_start(GTK_BOX(right_boat_box), 
         sim->right_patrol_entry, FALSE, FALSE, 0);
+
+
+    // Use the BoatSimulator structure fields
+    sim->width_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(sim->width_entry), "10");
+
+    sim->interval_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(sim->interval_entry), "5");
+
+    // Declare the labels for "Ancho del canal" and "Intervalo de tiempo"
+    GtkWidget *width_label = gtk_label_new("Ancho del canal");
+    GtkWidget *interval_label = gtk_label_new("Intervalo de tiempo (segundos)");
+
+    gtk_box_pack_start(GTK_BOX(left_panel), width_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(left_panel), sim->width_entry, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(left_panel), interval_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(left_panel), sim->interval_entry, FALSE, FALSE, 0);
+
+
     
     // Algorithm selection
     gtk_box_pack_start(GTK_BOX(left_panel), 
@@ -346,9 +343,9 @@ static void create_ui(BoatSimulator *sim) {
         gtk_label_new("Control"), FALSE, FALSE, 0);
     sim->control_combo = gtk_combo_box_text_new();
     // Control selection (continued)
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(sim->control_combo), "Tico");
-    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(sim->control_combo), "Letrero");
     gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(sim->control_combo), "Equidad");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(sim->control_combo), "Letrero");
+    gtk_combo_box_text_append_text(GTK_COMBO_BOX_TEXT(sim->control_combo), "Tico");
     gtk_combo_box_set_active(GTK_COMBO_BOX(sim->control_combo), 0);
     gtk_box_pack_start(GTK_BOX(left_panel), sim->control_combo, FALSE, FALSE, 0);
     g_signal_connect(G_OBJECT(sim->control_combo), "changed", G_CALLBACK(control_changed), sim);
@@ -446,7 +443,7 @@ static void save_data(GtkWidget *widget, gpointer data) {
     
     // Write headers
     fprintf(boats_file, "ID Tipo Océano Prioridad Tiempo_SJF Tiempo_Maximo\n");
-    fprintf(config_file, "Algoritmo Control ValoControl\n");
+    fprintf(config_file, "Algoritmo Control ValoControl AnchoCanal IntervaloLetrero\n");
     
     // Process and save boat data
     int id_counter = 1;
@@ -530,6 +527,11 @@ static void save_data(GtkWidget *widget, gpointer data) {
     const char *control = gtk_combo_box_text_get_active_text(
         GTK_COMBO_BOX_TEXT(sim->control_combo));
     const char *equity = gtk_entry_get_text(GTK_ENTRY(sim->equity_entry));
+
+    // Get the values for Canal Width and Time Interval
+    const char *canal_width = gtk_entry_get_text(GTK_ENTRY(sim->width_entry));
+    const char *time_interval = gtk_entry_get_text(GTK_ENTRY(sim->interval_entry));
+
     
     // Convert algorithm to initials
     const char *algorithm_initial;
@@ -540,9 +542,9 @@ static void save_data(GtkWidget *widget, gpointer data) {
     else if (strcmp(algorithm, "Tiempo Real") == 0) algorithm_initial = "TR";
     else algorithm_initial = algorithm;
     
-    fprintf(config_file, "%s %s %s\n", algorithm_initial, control,
-        strcmp(control, "Equidad") == 0 ? equity : "0");
-    
+    fprintf(config_file, "%s %s %s %s %s\n", algorithm_initial, control,
+        strcmp(control, "Equidad") == 0 ? equity : "0", canal_width, time_interval);
+
     fclose(boats_file);
     fclose(config_file);
     
@@ -566,11 +568,8 @@ int main(int argc, char *argv[]) {
     load_boat_images(&sim);
     create_ui(&sim);
     
-    // Inicializar la simulación con valores por defecto
-    inicializar_simulacion("/home/dylanggf/Documents/OS/CE_Threads/ce_threads/barcos.txt", 15);
-    
     gtk_widget_show_all(sim.window);
     gtk_main();
     
     return 0;
-} 
+}    
