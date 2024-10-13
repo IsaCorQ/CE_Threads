@@ -18,6 +18,8 @@ typedef struct {
     int y;
     GdkPixbuf *pixbuf;
     gboolean finished;
+    int total_distance;
+    int distance_moved;
 } Boat;
 
 typedef struct {
@@ -43,6 +45,7 @@ typedef struct {
     GtkWidget *interval_entry;
     Boat boats[MAX_BOATS];
     int boat_count;
+    int canal_width;
 } BoatSimulator;
 
 /// Function prototypes
@@ -134,12 +137,46 @@ static gboolean animate_boats(gpointer data) {
         }
     }
 
-    if (moves_left == 0) {
+    Boat *boat = NULL;
+    if (current_boat_id != -1) {
+        for (int i = 0; i < sim->boat_count; i++) {
+            if (sim->boats[i].id == current_boat_id) {
+                boat = &sim->boats[i];
+                break;
+            }
+        }
+    }
+
+    // If we don't have a current boat or the current boat has finished its moves, get the next instruction
+    if (!boat || moves_left == 0) {
         int id, moves;
         if (fscanf(output_file, "%d,%d", &id, &moves) == 2) {
             current_boat_id = id;
             moves_left = moves;
-            printf("New boat movement: Boat ID %d, Moves: %d\n", id, moves);
+            printf("New instruction: Boat ID %d, Moves: %d\n", id, moves);
+            
+            // Find the current boat
+            for (int i = 0; i < sim->boat_count; i++) {
+                if (sim->boats[i].id == current_boat_id) {
+                    boat = &sim->boats[i];
+                    break;
+                }
+            }
+
+            // If moves is 0, park the boat immediately
+            if (moves == 0) {
+                printf("Boat %d is parking.\n", boat->id);
+                if (strcmp(boat->ocean, "izquierda") == 0) {
+                    boat->x = 10 + (rand() % 400);  // Random x position in left parking
+                } else {
+                    boat->x = 460 + (rand() % 400);  // Random x position in right parking
+                }
+                boat->y = 610 + (rand() % 70);  // Random y position in parking
+                boat->finished = TRUE;
+                printf("Boat %d parked at x=%d, y=%d\n", boat->id, boat->x, boat->y);
+                moves_left = 0;  // Ensure we move to the next instruction on the next iteration
+                return G_SOURCE_CONTINUE;
+            }
         } else {
             fclose(output_file);
             output_file = NULL;
@@ -148,15 +185,7 @@ static gboolean animate_boats(gpointer data) {
         }
     }
 
-    Boat *boat = NULL;
-    for (int i = 0; i < sim->boat_count; i++) {
-        if (sim->boats[i].id == current_boat_id) {
-            boat = &sim->boats[i];
-            break;
-        }
-    }
-
-    if (boat) {
+    if (boat && !boat->finished) {
         printf("Moving Boat ID %d (%s) from %s side\n", boat->id, boat->type, boat->ocean);
         
         int speed_multiplier;
@@ -164,33 +193,23 @@ static gboolean animate_boats(gpointer data) {
         else if (strcmp(boat->type, "Pesquero") == 0) speed_multiplier = 2;
         else speed_multiplier = 3; // Patrulla
 
-        if (moves_left > 0) {
-            // Move the boat
-            int move_distance = 5 * speed_multiplier;
-            if (strcmp(boat->ocean, "izquierda") == 0) {
-                if (boat->y < 350) boat->y += move_distance;
-                else if (boat->x < 450) boat->x += move_distance;
-                else if (boat->y < 650) boat->y += move_distance;
-            } else {
-                if (boat->y < 350) boat->y += move_distance;
-                else if (boat->x > 450) boat->x -= move_distance;
-                else if (boat->y < 650) boat->y += move_distance;
-            }
-            moves_left--;
-            printf("Boat %d moved. New position: x=%d, y=%d. Moves left: %d\n", boat->id, boat->x, boat->y, moves_left);
+        // Calculate move distance based on speed
+        int move_distance = 5 * speed_multiplier;
+
+        // Move the boat
+        if (strcmp(boat->ocean, "izquierda") == 0) {
+            if (boat->y < 350) boat->y += move_distance;
+            else if (boat->x < 450) boat->x += move_distance;
+            else if (boat->y < 650) boat->y += move_distance;
         } else {
-            // Boat finished its movement or needs to go to parking
-            printf("Boat %d finished crossing or needs to park.\n", boat->id);
-            // Move to parking
-            if (strcmp(boat->ocean, "izquierda") == 0) {
-                boat->x = 10 + (rand() % 400);  // Random x position in left parking
-            } else {
-                boat->x = 460 + (rand() % 400);  // Random x position in right parking
-            }
-            boat->y = 610 + (rand() % 70);  // Random y position in parking
-            boat->finished = TRUE;
-            printf("Boat %d parked at x=%d, y=%d\n", boat->id, boat->x, boat->y);
+            if (boat->y < 350) boat->y += move_distance;
+            else if (boat->x > 450) boat->x -= move_distance;
+            else if (boat->y < 650) boat->y += move_distance;
         }
+
+        moves_left--;
+        printf("Boat %d moved. New position: x=%d, y=%d. Moves left: %d\n", 
+               boat->id, boat->x, boat->y, moves_left);
     }
 
     // Force an immediate redraw of the canvas
@@ -205,7 +224,7 @@ static gboolean animate_boats(gpointer data) {
     usleep(100000);  // Sleep for 100ms (0.1 seconds)
 
     return G_SOURCE_CONTINUE;
-}
+}   
 
 static void start_animation(GtkWidget *widget, gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
@@ -570,6 +589,12 @@ static void save_data(GtkWidget *widget, gpointer data) {
     // Get the values for Canal Width and Time Interval
     const char *canal_width = gtk_entry_get_text(GTK_ENTRY(sim->width_entry));
     const char *time_interval = gtk_entry_get_text(GTK_ENTRY(sim->interval_entry));
+
+
+    // Save canal width
+    const char *canal_width_str = gtk_entry_get_text(GTK_ENTRY(sim->width_entry));
+    sim->canal_width = atoi(canal_width_str);
+
 
     
     // Convert algorithm to initials

@@ -1,11 +1,7 @@
 ID Tipo Océano Prioridad Tiempo_SJF Tiempo_Maximo
-1 Normal izquierda 1 2 3
-2 Normal izquierda 4 5 6
-3 Patrulla izquierda 7 8 9
-4 Patrulla izquierda 4 3 1
-5 Patrulla izquierda 2 8 7
-6 Pesquero derecha 5 6 4
-7 Pesquero derecha 3 9 6
-8 Pesquero derecha 1 2 5
-9 Pesquero derecha 4 8 6
-10 Patrulla derecha 3 2 7
+1 Normal izquierda 5 3 2
+2 Normal izquierda 1 4 6
+3 Patrulla izquierda 9 5 7
+4 Patrulla izquierda 8 5 6
+5 Patrulla izquierda 4 3 1
+6 Pesquero derecha 5 2 6
