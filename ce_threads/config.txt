@@ -1,2 +1,2 @@
 Algoritmo Control ValoControl AnchoCanal IntervaloLetrero
-TR Equidad 1 10 5
+FCFS Tico 0 4 2

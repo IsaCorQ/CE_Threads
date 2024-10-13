@@ -28,9 +28,13 @@ typedef struct {
 char letrero[10] = "izquierda"; // Letrero inicial
 int barcos_avanzando = 0; // Barcos que están avanzando
 int barcos_cruzando = 0; // Barcos que están avanzando
+int barcos_terminados = 0; //numero de barcos que finalizaron el recorrido
+int W = 0; //variable que controla el numero de barcos en el canal equidad
 int ancho_canal = 0; // Ancho del canal definido por el usuario
+int canal = 0;
 cemutex_t canal_mutex; // Mutex para proteger el acceso al canal
 cecond_t canal_disponible; // Condición para indicar cuándo el canal está disponible
+int debio_cambiar_letrero = 0;
 
 Barco barcos[MAX_BARCOS]; // Max de 100 barcos
 int num_barcos;
@@ -42,6 +46,8 @@ int id_barco_prioridad_izq = -1;
 int barcos_izq = 0;
 int barcos_der = 0;
 char direccion[9];
+char tipo[8];
+char cruza[2];
 int signalSent = 0;
 
 // Function to count boats in the left and right oceans
@@ -56,9 +62,9 @@ void barcos_izq_der(const char *filename) {
 
     while (fgets(line, sizeof(line), file)) {
         char *token = strtok(line, " ");
-        token = strtok(NULL, " "); 
-        token = strtok(NULL, " "); 
-        
+        token = strtok(NULL, " ");
+        token = strtok(NULL, " ");
+
         if (token != NULL) {
             if (strstr(token, "izquierda") != NULL) {
                 barcos_izq++;
@@ -70,7 +76,6 @@ void barcos_izq_der(const char *filename) {
 
     fclose(file);
 }
-
 // Función para leer el archivo de texto
 int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
     FILE* file = fopen(archivo, "r");
@@ -389,6 +394,9 @@ void* cruzar_canal_tiempo_real(void* arg) {
         // Simular que el barco avanza un segundo
         printf("Barco %d (Tiempo máximo: %d, Tiempo restante: %d) está cruzando el canal...\n", 
                barco->id, barco->tiempo_maximo, barco->tiempo_cruzar);
+        
+        strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
 
         strcpy(direccion, barco->oceano);
         write(serial_port, direccion, 1);
@@ -401,13 +409,17 @@ void* cruzar_canal_tiempo_real(void* arg) {
         barcos_avanzando--; // El barco libera el control tras un segundo de avance
 
         if (barco->tiempo_cruzar == 0) {
+            strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado completamente el canal.\n", barco->id);
             barco->cruzo = 1; // Marcar el barco como que ya cruzó
+            barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
             barcos_cruzando = 0;
         }
 
         // Actualizar las prioridades dinámicamente después de cada segundo
         setear_tiempo_real();
+        sleep(1);
 
         // Notificar a los demás barcos que el canal está disponible
         cecond_broadcast(&canal_disponible);
@@ -436,7 +448,8 @@ void* cruzar_canal_prioridad(void* arg) {
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
@@ -448,20 +461,27 @@ void* cruzar_canal_prioridad(void* arg) {
     // Simular el cruce del barco completo
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+    
+    strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
     write(serial_port, direccion, 1);
-
+    
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
 
     cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     barco->cruzo = 1; // Actualizar el estado del barco
 
     // Actualizar las prioridades después de que el barco haya cruzado
     setear_prioridad();
+    sleep(1);
 
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
@@ -484,12 +504,15 @@ void* cruzar_canal_fcfs(void* arg) {
     cfsetospeed(&tty, B9600);
     tcsetattr(serial_port, TCSANOW, &tty);
 
+
+
     cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
 
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
@@ -501,22 +524,27 @@ void* cruzar_canal_fcfs(void* arg) {
     // Simular el cruce del barco completo
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+    
+    strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
     write(serial_port, direccion, 1);
+    
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
+
     cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
-    if (signalSent == 0){
-        strcpy(direccion, barco->oceano);
-        write(serial_port, direccion, 1);
-        signalSent =1;
-    }
 
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
+    sleep(1);
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     setear_fcfs();
+    sleep(1);
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
     cemutex_unlock(&canal_mutex); // Desbloquear el mutex
@@ -542,7 +570,8 @@ void* cruzar_canal_sjf(void* arg) {
     // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
     while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
            (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq ||
+           debio_cambiar_letrero == 1)) {
 
         cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
     }
@@ -554,6 +583,9 @@ void* cruzar_canal_sjf(void* arg) {
     // Simular el cruce del barco completo
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
+    
+    strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
     write(serial_port, direccion, 1);
@@ -564,10 +596,14 @@ void* cruzar_canal_sjf(void* arg) {
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
+    barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
 
     // Actualizar las prioridades después de que el barco haya cruzado
     setear_sjf();
+    sleep(1);
 
     // Notificar a otros barcos que pueden avanzar
     cecond_broadcast(&canal_disponible);
@@ -614,6 +650,9 @@ void* cruzar_canal_round_robin(void* arg) {
         int tiempo_a_avanzar = (barco->tiempo_cruzar > QUANTUM) ? QUANTUM : barco->tiempo_cruzar;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
         
+        strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
+
         strcpy(direccion, barco->oceano);
         write(serial_port, direccion, 1);
 
@@ -628,12 +667,16 @@ void* cruzar_canal_round_robin(void* arg) {
         
 
         if (barco->tiempo_cruzar <= 0) {
+            strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+            barcos_terminados++; //agrega a la variable que el barco finalizó su recorrido
             barco->cruzo = 1;
             barcos_cruzando--;
         }
         
         setear_round_robin();
+        sleep(1);
         // Notificar a otro barco del mismo lado que puede avanzar
         cecond_broadcast(&canal_disponible);
 
@@ -655,13 +698,37 @@ void cambiar_letrero() {
         } else {
             strcpy(letrero, "izquierda");
         }
+        debio_cambiar_letrero = 0;
         printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
         cecond_broadcast(&canal_disponible); // Notificar a los hilos del cambio del letrero
+    } else {
+        debio_cambiar_letrero = 1;
     }
     cemutex_unlock(&canal_mutex); // Desbloquear el mutex
 }
+void cambiar_letrero_equidad(){
+  cemutex_lock(&canal_mutex);
+  printf("%d, %d \n", barcos_avanzando, barcos_cruzando);
+  if (barcos_avanzando == 0 && barcos_cruzando == 0) { //revisa si no hay barcos cruzando
+    if ((barcos_terminados == W || barcos_izq == 0) && strcmp(letrero, "izquierda") == 0) { //revisa el letrero y si ya pasaron los barcos W o no  hay mas
+          strcpy(letrero, "derecha");
+          printf("Der\n");
+          printf("%d", barcos_terminados);
+          barcos_izq--;
+          printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
+        } else if ((barcos_terminados == W || barcos_der == 0) && strcmp(letrero, "derecha") == 0) {
+            strcpy(letrero, "izquierda");
+            printf("Izq\n");
+            printf("%d", barcos_terminados);
+            barcos_der--;
+            printf("\n[LETRERO] Ahora el sentido es hacia: %s\n\n", letrero);
+        }
+      }
+   cemutex_unlock(&canal_mutex);
+}
 
 int main() {
+    int flag = 1;
     cethread_t hilos[MAX_BARCOS]; // Arreglo de hilos
     int hilo_index = 0; // Índice para el arreglo de hilos
 
@@ -670,10 +737,8 @@ int main() {
         perror("Error opening serial port");
         return 1;
     }
-
+    
     barcos_izq_der("barcos.txt");
-    printf("Number of boats in the left ocean: %d\n", barcos_izq);
-    printf("Number of boats in the right ocean: %d\n", barcos_der);
 
     struct termios tty;
     tcgetattr(serial_port, &tty);
@@ -689,13 +754,30 @@ int main() {
     scanf("%d", &ancho_canal);
 
     num_barcos = leer_barcos("barcos.txt", barcos, MAX_BARCOS); // Leer los barcos desde el archivo
-   
+
     char input[2];
     snprintf(input, sizeof(input), "%d", num_barcos); 
     write(serial_port, input, 1);
 
     if (num_barcos < 0) {
         return 1; // Error al leer el archivo
+    }
+
+    int canal;
+    printf("Seleccione el tipo de control de flujo\n");
+    printf("1. Equidad\n");
+    printf("2. Letrero\n");
+    printf("3. Tico\n");
+    scanf("%d", &canal);
+
+    if (canal == 1){
+        printf("Control de flujo: Equidad\n");
+        printf("Indique el valor de W:\n");
+        scanf("%d", &W);
+    } else if (canal == 2){
+        printf("Control de flujo : Letrero\n");
+    } else if (canal == 3){
+        printf("Control de flujo : Tico\n");
     }
 
     int algoritmo;
@@ -718,7 +800,7 @@ int main() {
     // Ordenar los barcos según el algoritmo seleccionado antes de crear los hilos
     if (algoritmo == 1) { // Round Robin
         setear_round_robin();
-        }else if (algoritmo == 2) { // Prioridad
+    }else if (algoritmo == 2) { // Prioridad
         setear_prioridad();
     } else if (algoritmo == 3) { // Shortest Job First
         setear_sjf();
@@ -728,6 +810,9 @@ int main() {
         setear_tiempo_real();
     }
 
+    if (canal == 1){
+            cambiar_letrero_equidad();
+    }
     // Crear los hilos (barcos) que cruzarán el canal dependiendo del algoritmo seleccionado
 	for (int i = 0; i < num_barcos && hilo_index < MAX_BARCOS; i++) {
 	    if (algoritmo == 1) { // Round Robin
@@ -754,11 +839,11 @@ int main() {
 		printf("Algoritmo no implementado.\n");
 		return 1;
 	    }
-	    cethread_detach(&hilos[hilo_index]); // Desvincular el hilo 
+	    cethread_detach(&hilos[hilo_index]); // Desvincular el hilo para no necesitar cethread_join
 	    hilo_index++;
 	}
 
-    // Variables para monitorear el tiempo para cambiar el letrero
+
     time_t ultimo_cambio = time(NULL);
 
     while (1) {
@@ -851,8 +936,6 @@ int main() {
     cecond_destroy(&canal_disponible);
 
     printf("Todos los barcos han cruzado el canal.\n");
-
-   
     close(serial_port);
     return 0;
 }
