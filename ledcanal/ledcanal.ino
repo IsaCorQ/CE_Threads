@@ -1,4 +1,3 @@
-
 int leftGreenLed = 52;
 int leftRedLed = 53;
 int rightGreenLed = 42;
