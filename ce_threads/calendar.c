@@ -497,7 +497,7 @@ void* cruzar_canal_round_robin(void* arg) {
 
         cemutex_unlock(&canal_mutex);
 
-        //sleep(1);
+        sleep(1);
     }
 
     cethread_exit(NULL);
@@ -606,7 +606,7 @@ int main() {
     time_t ultimo_cambio = time(NULL);
 
     while (1) {
-        //sleep(1); // Intervalo corto para permitir la detección oportuna de cambios
+        sleep(1); // Intervalo corto para permitir la detección oportuna de cambios
 
         time_t ahora = time(NULL);
         if (difftime(ahora, ultimo_cambio) >= intervalo_letrero) {
