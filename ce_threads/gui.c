@@ -4,6 +4,7 @@
 #include <string.h>
 #include <limits.h>
 #include <unistd.h>
+#include <math.h>
 
 #define MAX_BOATS 100
 
@@ -61,6 +62,11 @@ static void save_data(GtkWidget *widget, gpointer data);
 
 static Boat displayed_boats[MAX_BOATS];
 static int boat_count = 0;
+
+void *run_calendar(void *arg) {
+    system("./calendar");
+    return NULL;
+}
 
 static void load_boat_images(BoatSimulator *sim) {
     // Load boat images
@@ -149,6 +155,7 @@ static gboolean animate_boats(gpointer data) {
 
     // If we don't have a current boat or the current boat has finished its moves, get the next instruction
     if (!boat || moves_left == 0) {
+        sleep(1);  // Wait for the boat to park
         int id, moves;
         if (fscanf(output_file, "%d,%d", &id, &moves) == 2) {
             current_boat_id = id;
@@ -167,9 +174,9 @@ static gboolean animate_boats(gpointer data) {
             if (moves == 0) {
                 printf("Boat %d is parking.\n", boat->id);
                 if (strcmp(boat->ocean, "izquierda") == 0) {
-                    boat->x = 10 + (rand() % 400);  // Random x position in left parking
-                } else {
                     boat->x = 460 + (rand() % 400);  // Random x position in right parking
+                } else {
+                    boat->x = 10 + (rand() % 400);  // Random x position in left parking
                 }
                 boat->y = 610 + (rand() % 70);  // Random y position in parking
                 boat->finished = TRUE;
@@ -196,15 +203,36 @@ static gboolean animate_boats(gpointer data) {
         // Calculate move distance based on speed
         int move_distance = 5 * speed_multiplier;
 
-        // Move the boat
+        // Calculate target position
+        int target_x, target_y;
         if (strcmp(boat->ocean, "izquierda") == 0) {
-            if (boat->y < 350) boat->y += move_distance;
-            else if (boat->x < 450) boat->x += move_distance;
-            else if (boat->y < 650) boat->y += move_distance;
+            target_x = 450;
+            target_y = 350;
         } else {
-            if (boat->y < 350) boat->y += move_distance;
-            else if (boat->x > 450) boat->x -= move_distance;
-            else if (boat->y < 650) boat->y += move_distance;
+            target_x = 450;
+            target_y = 350;
+        }
+
+        // Calculate direction vector
+        float dx = target_x - boat->x;
+        float dy = target_y - boat->y;
+        float length = sqrt(dx*dx + dy*dy);
+        if (length > 0) {
+            dx /= length;
+            dy /= length;
+        }
+
+        // Move the boat diagonally
+        boat->x += (int)(dx * move_distance);
+        boat->y += (int)(dy * move_distance);
+
+        // Ensure the boat doesn't overshoot the target
+        if ((strcmp(boat->ocean, "izquierda") == 0 && boat->x > target_x) ||
+            (strcmp(boat->ocean, "derecha") == 0 && boat->x < target_x)) {
+            boat->x = target_x;
+        }
+        if (boat->y > target_y) {
+            boat->y = target_y;
         }
 
         moves_left--;
@@ -233,7 +261,6 @@ static void start_animation(GtkWidget *widget, gpointer data) {
         return;
     }
     
-    // Check if barcos.txt exists and has content
     FILE *f = fopen("barcos.txt", "r");
     if (!f) {
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
@@ -247,22 +274,18 @@ static void start_animation(GtkWidget *widget, gpointer data) {
     }
     fclose(f);
 
-    // Execute calendar.c
-    system("./calendar");
-
-    // Read output.txt
-    FILE *output_file = fopen("output.txt", "r");
-    if (!output_file) {
+    // Create and start the calendar thread
+    pthread_t calendar_thread;
+    if (pthread_create(&calendar_thread, NULL, run_calendar, NULL) != 0) {
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
             GTK_DIALOG_DESTROY_WITH_PARENT,
             GTK_MESSAGE_ERROR,
             GTK_BUTTONS_CLOSE,
-            "No se pudo abrir output.txt");
+            "Error al iniciar el hilo de calendar.");
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
         return;
     }
-    fclose(output_file);
 
     sim->animation_running = TRUE;
     sim->animation_timeout_id = g_timeout_add(50, animate_boats, sim);
