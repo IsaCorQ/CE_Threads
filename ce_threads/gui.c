@@ -37,6 +37,8 @@ typedef struct {
     GtkWidget *right_normal_entry;
     GtkWidget *right_fishing_entry;
     GtkWidget *right_patrol_entry;
+    GtkWidget *letrero_frame;
+    GtkWidget *letrero_entry;
     gboolean animation_running;
     guint animation_timeout_id;
     GdkPixbuf *normal_boat_pixbuf;
@@ -268,7 +270,14 @@ static gboolean animate_boats(gpointer data) {
     }
     
     // Add a small delay to control animation speed
-    usleep(100000);  // Sleep for 100ms (0.1 seconds)
+    // Modified sleep behavior
+    if (moves_left == 0) {
+        sleep(1);  // Sleep for 10 seconds if moves is 0
+        printf("Boat %d is parking. Sleeping for 10 seconds.\n", boat->id);
+    } else {
+        sleep(moves_left);  // Sleep for 'moves' seconds if moves is not 0
+        printf("Boat %d is moving. Sleeping for %d seconds.\n", boat->id, moves_left);
+    }
 
     return G_SOURCE_CONTINUE;
 }
@@ -317,8 +326,13 @@ static void control_changed(GtkComboBox *widget, gpointer data) {
     
     if (g_strcmp0(selected, "Equidad") == 0) {
         gtk_widget_show(sim->equity_frame);
+        gtk_widget_hide(sim->letrero_frame);
+    } else if (g_strcmp0(selected, "Letrero") == 0) {
+        gtk_widget_hide(sim->equity_frame);
+        gtk_widget_show(sim->letrero_frame);
     } else {
         gtk_widget_hide(sim->equity_frame);
+        gtk_widget_hide(sim->letrero_frame);
     }
     
     g_free(selected);
@@ -452,6 +466,14 @@ static void create_ui(BoatSimulator *sim) {
     gtk_entry_set_text(GTK_ENTRY(sim->equity_entry), "1");
     gtk_container_add(GTK_CONTAINER(sim->equity_frame), sim->equity_entry);
     gtk_widget_hide(sim->equity_frame);
+
+    // Letrero frame (new)
+    sim->letrero_frame = gtk_frame_new("Letrero");
+    gtk_box_pack_start(GTK_BOX(left_panel), sim->letrero_frame, FALSE, FALSE, 0);
+    sim->letrero_entry = gtk_entry_new();
+    gtk_entry_set_text(GTK_ENTRY(sim->letrero_entry), "1");
+    gtk_container_add(GTK_CONTAINER(sim->letrero_frame), sim->letrero_entry);
+    gtk_widget_hide(sim->letrero_frame);
     
     // Buttons
     GtkWidget *save_button = gtk_button_new_with_label("Guardar");
@@ -637,6 +659,8 @@ static void save_data(GtkWidget *widget, gpointer data) {
     const char *canal_width_str = gtk_entry_get_text(GTK_ENTRY(sim->width_entry));
     sim->canal_width = atoi(canal_width_str);
 
+    const char *letrero = gtk_entry_get_text(GTK_ENTRY(sim->letrero_entry));
+
 
     
     // Convert algorithm to initials
@@ -649,7 +673,9 @@ static void save_data(GtkWidget *widget, gpointer data) {
     else algorithm_initial = algorithm;
     
     fprintf(config_file, "%s %s %s %s %s\n", algorithm_initial, control,
-        strcmp(control, "Equidad") == 0 ? equity : "0", canal_width, time_interval);
+    strcmp(control, "Equidad") == 0 ? equity : 
+    (strcmp(control, "Letrero") == 0 ? letrero : "0"),
+    canal_width, time_interval);
 
     fclose(boats_file);
     fclose(config_file);

@@ -38,7 +38,6 @@ int debio_cambiar_letrero = 0;
 int intervalo_letrero = 0;
 int algoritmo = 0;
 
-
 Barco barcos[MAX_BARCOS]; // Max de 100 barcos
 int num_barcos;
 
@@ -144,6 +143,67 @@ int leer_barcos(const char* archivo, Barco barcos[], int max_barcos) {
     return i; // Devolver el número de barcos leídos
 }
 
+// Función que actualiza la lista de barcos si hay nuevos barcos en el archivo
+int actualizar_barcos(const char* archivo, Barco barcos[], int num_barcos_actual) {
+    FILE* file = fopen(archivo, "r");
+    if (file == NULL) {
+        perror("No se puede abrir el archivo");
+        return -1;
+    }
+
+    char buffer[256];
+    Barco nuevos_barcos[MAX_BARCOS];
+    int num_nuevos_barcos = 0;
+
+    // Leer la cabecera del archivo
+    fgets(buffer, sizeof(buffer), file);
+
+    // Leer cada línea del archivo y cargar los nuevos barcos en una lista temporal
+    while (fgets(buffer, sizeof(buffer), file)) {
+        sscanf(buffer, "%d %s %s %d %d", &nuevos_barcos[num_nuevos_barcos].id, nuevos_barcos[num_nuevos_barcos].tipo,
+               nuevos_barcos[num_nuevos_barcos].oceano, &nuevos_barcos[num_nuevos_barcos].prioridad,
+               &nuevos_barcos[num_nuevos_barcos].tiempo_maximo);
+
+        // Asignar la velocidad según el tipo de barco
+        if (strcmp(nuevos_barcos[num_nuevos_barcos].tipo, "Patrulla") == 0) {
+            nuevos_barcos[num_nuevos_barcos].velocidad = 3; // Barcos patrulla son los más rápidos
+        } else if (strcmp(nuevos_barcos[num_nuevos_barcos].tipo, "Pesquero") == 0) {
+            nuevos_barcos[num_nuevos_barcos].velocidad = 2; // Barcos pesqueros son intermedios
+        } else {
+            nuevos_barcos[num_nuevos_barcos].velocidad = 1; // Barcos normales son los más lentos
+        }
+
+        // Calcular el tiempo restante para cruzar el canal
+        nuevos_barcos[num_nuevos_barcos].tiempo_cruzar = (nuevos_barcos[num_nuevos_barcos].velocidad != 0) ? 
+                                                         (ancho_canal / nuevos_barcos[num_nuevos_barcos].velocidad) : 0;
+        nuevos_barcos[num_nuevos_barcos].cruzo = 0; // Inicialmente, el barco no ha cruzado
+
+        num_nuevos_barcos++;
+    }
+
+    fclose(file);
+
+    // Comparar los nuevos barcos con los existentes por su ID
+    for (int i = 0; i < num_nuevos_barcos; i++) {
+        int encontrado = 0;
+        for (int j = 0; j < num_barcos_actual; j++) {
+            if (nuevos_barcos[i].id == barcos[j].id) {
+                encontrado = 1;
+                break;
+            }
+        }
+        // Si no se encuentra el barco en la lista actual, se agrega
+        if (!encontrado && num_barcos_actual < MAX_BARCOS) {
+            barcos[num_barcos_actual] = nuevos_barcos[i];
+            num_barcos_actual++;
+            printf("Nuevo barco agregado: ID=%d, Tipo=%s, Océano=%s\n",
+                   nuevos_barcos[i].id, nuevos_barcos[i].tipo, nuevos_barcos[i].oceano);
+        }
+    }
+
+    return num_barcos_actual; // Devolver el nuevo número de barcos
+}
+
 int leer_config(const char* archivo_config, int* algoritmo, int* canal, int* W, int* ancho_canal, int* intervalo_letrero) {
     FILE* file = fopen(archivo_config, "r");
     if (file == NULL) {
@@ -208,67 +268,6 @@ int leer_config(const char* archivo_config, int* algoritmo, int* canal, int* W, 
 
     fclose(file);
     return 0;
-}
-
-// Función que actualiza la lista de barcos si hay nuevos barcos en el archivo
-int actualizar_barcos(const char* archivo, Barco barcos[], int num_barcos_actual) {
-    FILE* file = fopen(archivo, "r");
-    if (file == NULL) {
-        perror("No se puede abrir el archivo");
-        return -1;
-    }
-
-    char buffer[256];
-    Barco nuevos_barcos[MAX_BARCOS];
-    int num_nuevos_barcos = 0;
-
-    // Leer la cabecera del archivo
-    fgets(buffer, sizeof(buffer), file);
-
-    // Leer cada línea del archivo y cargar los nuevos barcos en una lista temporal
-    while (fgets(buffer, sizeof(buffer), file)) {
-        sscanf(buffer, "%d %s %s %d %d", &nuevos_barcos[num_nuevos_barcos].id, nuevos_barcos[num_nuevos_barcos].tipo,
-               nuevos_barcos[num_nuevos_barcos].oceano, &nuevos_barcos[num_nuevos_barcos].prioridad,
-               &nuevos_barcos[num_nuevos_barcos].tiempo_maximo);
-
-        // Asignar la velocidad según el tipo de barco
-        if (strcmp(nuevos_barcos[num_nuevos_barcos].tipo, "Patrulla") == 0) {
-            nuevos_barcos[num_nuevos_barcos].velocidad = 3; // Barcos patrulla son los más rápidos
-        } else if (strcmp(nuevos_barcos[num_nuevos_barcos].tipo, "Pesquero") == 0) {
-            nuevos_barcos[num_nuevos_barcos].velocidad = 2; // Barcos pesqueros son intermedios
-        } else {
-            nuevos_barcos[num_nuevos_barcos].velocidad = 1; // Barcos normales son los más lentos
-        }
-
-        // Calcular el tiempo restante para cruzar el canal
-        nuevos_barcos[num_nuevos_barcos].tiempo_cruzar = (nuevos_barcos[num_nuevos_barcos].velocidad != 0) ? 
-                                                         (ancho_canal / nuevos_barcos[num_nuevos_barcos].velocidad) : 0;
-        nuevos_barcos[num_nuevos_barcos].cruzo = 0; // Inicialmente, el barco no ha cruzado
-
-        num_nuevos_barcos++;
-    }
-
-    fclose(file);
-
-    // Comparar los nuevos barcos con los existentes por su ID
-    for (int i = 0; i < num_nuevos_barcos; i++) {
-        int encontrado = 0;
-        for (int j = 0; j < num_barcos_actual; j++) {
-            if (nuevos_barcos[i].id == barcos[j].id) {
-                encontrado = 1;
-                break;
-            }
-        }
-        // Si no se encuentra el barco en la lista actual, se agrega
-        if (!encontrado && num_barcos_actual < MAX_BARCOS) {
-            barcos[num_barcos_actual] = nuevos_barcos[i];
-            num_barcos_actual++;
-            printf("Nuevo barco agregado: ID=%d, Tipo=%s, Océano=%s\n",
-                   nuevos_barcos[i].id, nuevos_barcos[i].tipo, nuevos_barcos[i].oceano);
-        }
-    }
-
-    return num_barcos_actual; // Devolver el nuevo número de barcos
 }
 
 void setear_prioridad() {
@@ -463,7 +462,12 @@ void setear_tiempo_real() {
 void* cruzar_canal_tiempo_real(void* arg) {
     Barco* barco = (Barco*)arg;
 
-
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
     while (barco->tiempo_cruzar > 0) {
         cemutex_lock(&canal_mutex); // Bloquear el mutex para controlar el acceso
@@ -484,12 +488,12 @@ void* cruzar_canal_tiempo_real(void* arg) {
         // Simular que el barco avanza un segundo
         printf("Barco %d (Tiempo máximo: %d, Tiempo restante: %d) está cruzando el canal...\n", 
                barco->id, barco->tiempo_maximo, barco->tiempo_cruzar);
-
-        registrar_movimiento_barco(barco->id, 1);
         
         strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
 
         strcpy(direccion, barco->oceano);
+        write(serial_port, direccion, 1);
 
         sleep(1);
         barco->tiempo_cruzar--; // Reducir el tiempo restante
@@ -500,11 +504,11 @@ void* cruzar_canal_tiempo_real(void* arg) {
 
         if (barco->tiempo_cruzar == 0) {
             strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado completamente el canal.\n", barco->id);
             barco->cruzo = 1; // Marcar el barco como que ya cruzó
             barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
             barcos_cruzando = 0;
-            registrar_movimiento_barco(barco->id, 0);
         }
 
         // Actualizar las prioridades dinámicamente después de cada segundo
@@ -526,7 +530,12 @@ void* cruzar_canal_tiempo_real(void* arg) {
 void* cruzar_canal_prioridad(void* arg) {
     Barco* barco = (Barco*)arg;
 
-
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
     cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
 
@@ -550,8 +559,10 @@ void* cruzar_canal_prioridad(void* arg) {
     registrar_movimiento_barco(barco->id, barco->tiempo_cruzar);
     
     strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
     
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
 
@@ -561,6 +572,7 @@ void* cruzar_canal_prioridad(void* arg) {
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
     registrar_movimiento_barco(barco->id, 0);
     strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     barco->cruzo = 1; // Actualizar el estado del barco
 
@@ -582,7 +594,12 @@ void* cruzar_canal_prioridad(void* arg) {
 void* cruzar_canal_fcfs(void* arg) {
     Barco* barco = (Barco*)arg;
 
-
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
 
 
@@ -608,8 +625,10 @@ void* cruzar_canal_fcfs(void* arg) {
     registrar_movimiento_barco(barco->id, barco->tiempo_cruzar);
     
     strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
     
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
 
@@ -620,6 +639,7 @@ void* cruzar_canal_fcfs(void* arg) {
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
     registrar_movimiento_barco(barco->id, 0);
     strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
     sleep(1);
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
@@ -638,7 +658,12 @@ void* cruzar_canal_fcfs(void* arg) {
 void* cruzar_canal_sjf(void* arg) {
     Barco* barco = (Barco*)arg;
 
-
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
     cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
 
@@ -658,12 +683,13 @@ void* cruzar_canal_sjf(void* arg) {
     // Simular el cruce del barco completo
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
-
     registrar_movimiento_barco(barco->id, barco->tiempo_cruzar);
     
     strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
 
     strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
 
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
 
@@ -673,6 +699,7 @@ void* cruzar_canal_sjf(void* arg) {
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
     registrar_movimiento_barco(barco->id, 0);
     strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
 
@@ -694,6 +721,12 @@ void* cruzar_canal_round_robin(void* arg) {
     Barco* barco = (Barco*)arg;
     int conto_barco = 0;
 
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
     while (barco->tiempo_cruzar > 0) {
         cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
@@ -721,8 +754,10 @@ void* cruzar_canal_round_robin(void* arg) {
         registrar_movimiento_barco(barco->id, tiempo_a_avanzar);
         
         strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
 
         strcpy(direccion, barco->oceano);
+        write(serial_port, direccion, 1);
 
         sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
 
@@ -736,6 +771,7 @@ void* cruzar_canal_round_robin(void* arg) {
 
         if (barco->tiempo_cruzar <= 0) {
             strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
             registrar_movimiento_barco(barco->id, 0);
             barcos_terminados++; //agrega a la variable que el barco finalizó su recorrido
@@ -800,24 +836,36 @@ int main() {
     cethread_t hilos[MAX_BARCOS]; // Arreglo de hilos
     int hilo_index = 0; // Índice para el arreglo de hilos
 
-    if (leer_config("config.txt", &algoritmo, &canal, &W, &ancho_canal, &intervalo_letrero) < 0) {
-            return 1; // Error al leer la configuración
-        }
+    int serial_port = open("/dev/ttyACM0", O_RDWR);
+    if (serial_port < 0) {
+        perror("Error opening serial port");
+        return 1;
+    }
 
+    if (leer_config("config.txt", &algoritmo, &canal, &W, &ancho_canal, &intervalo_letrero) < 0) {
+        return 1; // Error al leer la configuración
+    }
     
     barcos_izq_der("barcos.txt");
 
+    struct termios tty;
+    tcgetattr(serial_port, &tty);
+    cfsetispeed(&tty, B9600);
+    cfsetospeed(&tty, B9600);
+    tcsetattr(serial_port, TCSANOW, &tty);
 
+    char resetCommand[2] = "0"; // Reset command
+    write(serial_port, resetCommand, 1); 
 
     num_barcos = leer_barcos("barcos.txt", barcos, MAX_BARCOS); // Leer los barcos desde el archivo
 
     char input[2];
     snprintf(input, sizeof(input), "%d", num_barcos); 
+    write(serial_port, input, 1);
 
     if (num_barcos < 0) {
         return 1; // Error al leer el archivo
     }
-
 
     // Imprimir la configuración leída
     printf("Configuración cargada:\n");
@@ -959,6 +1007,7 @@ int main() {
         cemutex_unlock(&canal_mutex);
         if (todos_cruzaron) {
             char reset_command[] = "reset";
+            write(serial_port, reset_command, 1);
             break;
         }
         
@@ -972,5 +1021,6 @@ int main() {
     cecond_destroy(&canal_disponible);
 
     printf("Todos los barcos han cruzado el canal.\n");
+    close(serial_port);
     return 0;
 }
