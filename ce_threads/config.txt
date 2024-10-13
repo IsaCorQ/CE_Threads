@@ -1,2 +1,2 @@
 Algoritmo Control ValoControl AnchoCanal IntervaloLetrero
-RR Equidad 1 10 5
+TR Equidad 1 10 5
