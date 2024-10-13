@@ -134,6 +134,7 @@ static gboolean animate_boats(gpointer data) {
     static FILE *output_file = NULL;
     static int current_boat_id = -1;
     static int moves_left = 0;
+    static gboolean is_parking = FALSE;
 
     if (!output_file) {
         output_file = fopen("output.txt", "r");
@@ -159,14 +160,31 @@ static gboolean animate_boats(gpointer data) {
         sleep(1);  // Wait for the boat to park
         int id, moves;
         if (fscanf(output_file, "%d,%d", &id, &moves) == 2) {
+            // If the boat ID changes, hide all boats except those in start or parking areas
+            if (id != current_boat_id && !is_parking) {
+                for (int i = 0; i < sim->boat_count; i++) {
+                    if (sim->boats[i].y > 90 && sim->boats[i].y < 600 && !sim->boats[i].finished) {
+                        sim->boats[i].pixbuf = NULL;  // Hide the boat
+                    }
+                }
+            }
+
             current_boat_id = id;
             moves_left = moves;
+            is_parking = (moves == 0);
             printf("New instruction: Boat ID %d, Moves: %d\n", id, moves);
             
-            // Find the current boat
+            // Find the current boat and make it visible
             for (int i = 0; i < sim->boat_count; i++) {
                 if (sim->boats[i].id == current_boat_id) {
                     boat = &sim->boats[i];
+                    // Restore the correct pixbuf based on the boat type
+                    if (strcmp(boat->type, "Normal") == 0)
+                        boat->pixbuf = sim->normal_boat_pixbuf;
+                    else if (strcmp(boat->type, "Pesquero") == 0)
+                        boat->pixbuf = sim->fishing_boat_pixbuf;
+                    else
+                        boat->pixbuf = sim->patrol_boat_pixbuf;
                     break;
                 }
             }
@@ -253,7 +271,7 @@ static gboolean animate_boats(gpointer data) {
     usleep(100000);  // Sleep for 100ms (0.1 seconds)
 
     return G_SOURCE_CONTINUE;
-}   
+}
 
 static void start_animation(GtkWidget *widget, gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
