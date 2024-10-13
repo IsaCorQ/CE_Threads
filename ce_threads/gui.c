@@ -3,8 +3,22 @@
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <unistd.h>
 
 #define MAX_BOATS 100
+
+typedef struct {
+    int id;
+    char type[20];
+    char ocean[20];
+    int priority;
+    int sjf_time;
+    int max_time;
+    int x;
+    int y;
+    GdkPixbuf *pixbuf;
+    gboolean finished;
+} Boat;
 
 typedef struct {
     GtkWidget *window;
@@ -13,42 +27,25 @@ typedef struct {
     GtkWidget *control_combo;
     GtkWidget *equity_frame;
     GtkWidget *equity_entry;
-
-    // Boat count entries
     GtkWidget *left_normal_entry;
     GtkWidget *left_fishing_entry;
     GtkWidget *left_patrol_entry;
     GtkWidget *right_normal_entry;
     GtkWidget *right_fishing_entry;
     GtkWidget *right_patrol_entry;
-
-    // Animation variables
     gboolean animation_running;
     guint animation_timeout_id;
-
-    // Boat images
     GdkPixbuf *normal_boat_pixbuf;
     GdkPixbuf *fishing_boat_pixbuf;
     GdkPixbuf *patrol_boat_pixbuf;
-
-    // Background image
     GdkPixbuf *ocean_pixbuf;
-
-    // New entries for canal width and time interval
     GtkWidget *width_entry;
     GtkWidget *interval_entry;
+    Boat boats[MAX_BOATS];
+    int boat_count;
 } BoatSimulator;
 
-
-typedef struct {
-    int x;
-    int y;
-    GdkPixbuf *pixbuf;
-    char type[20];
-    char direction[20];
-} Boat;
-
-// Function prototypes
+/// Function prototypes
 static void load_boat_images(BoatSimulator *sim);
 static void create_ui(BoatSimulator *sim);
 static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data);
@@ -57,6 +54,7 @@ static void start_animation(GtkWidget *widget, gpointer data);
 static void control_changed(GtkComboBox *widget, gpointer data);
 static int get_validated_user_input(GtkWindow *parent, const char *prompt);
 static void save_data(GtkWidget *widget, gpointer data);
+
 
 static Boat displayed_boats[MAX_BOATS];
 static int boat_count = 0;
@@ -86,7 +84,7 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
     if (sim->ocean_pixbuf) {
         gdk_cairo_set_source_pixbuf(cr, sim->ocean_pixbuf, 75, 75);
         cairo_paint(cr);
-    }
+    } 
     
     // Draw zones
     cairo_set_line_width(cr, 2);
@@ -112,8 +110,8 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
     cairo_stroke(cr);
     
     // Draw boats
-    for (int i = 0; i < boat_count; i++) {
-        Boat *boat = &displayed_boats[i];
+    for (int i = 0; i < sim->boat_count; i++) {
+        Boat *boat = &sim->boats[i];
         if (boat->pixbuf) {
             gdk_cairo_set_source_pixbuf(cr, boat->pixbuf, boat->x, boat->y);
             cairo_paint(cr);
@@ -123,54 +121,74 @@ static void draw_canvas(GtkWidget *widget, cairo_t *cr, gpointer data) {
 
 static gboolean animate_boats(gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
-    gboolean moved = FALSE;
-    
-    for (int i = 0; i < boat_count; i++) {
-        Boat *boat = &displayed_boats[i];
-        
-        if (strstr(boat->direction, "izquierda")) {
-            if (boat->y < 350) {
-                boat->y += 5;
-                moved = TRUE;
-            } else if (boat->x < 450) {
-                boat->x += 5;
-                moved = TRUE;
-            } else if (boat->y < 650) {
-                boat->y += 5;
-                moved = TRUE;
+    static FILE *output_file = NULL;
+    static int current_boat_id = -1;
+    static int moves_left = 0;
+
+    if (!output_file) {
+        output_file = fopen("output.txt", "r");
+        if (!output_file) {
+            g_print("Error opening output.txt\n");
+            sim->animation_running = FALSE;
+            return G_SOURCE_REMOVE;
+        }
+    }
+
+    if (moves_left == 0) {
+        int id, moves;
+        if (fscanf(output_file, "%d,%d", &id, &moves) == 2) {
+            current_boat_id = id;
+            moves_left = moves;
+        } else {
+            fclose(output_file);
+            output_file = NULL;
+            sim->animation_running = FALSE;
+            return G_SOURCE_REMOVE;
+        }
+    }
+
+    Boat *boat = NULL;
+    for (int i = 0; i < sim->boat_count; i++) {
+        if (sim->boats[i].id == current_boat_id) {
+            boat = &sim->boats[i];
+            break;
+        }
+    }
+
+    if (boat) {
+        if (moves_left > 0) {
+            // Move the boat
+            if (strcmp(boat->ocean, "izquierda") == 0) {
+                if (boat->y < 350) boat->y += 5;
+                else if (boat->x < 450) boat->x += 5;
+                else if (boat->y < 650) boat->y += 5;
             } else {
-                boat->x = 460 + (boat->x - 10);
-                boat->y = 650;
-                strcpy(boat->direction, "derecha");
-                moved = TRUE;
+                if (boat->y < 350) boat->y += 5;
+                else if (boat->x > 450) boat->x -= 5;
+                else if (boat->y < 650) boat->y += 5;
             }
-        } else if (strstr(boat->direction, "derecha")) {
-            if (boat->y < 350) {
-                boat->y += 5;
-                moved = TRUE;
-            } else if (boat->x > 450) {
-                boat->x -= 5;
-                moved = TRUE;
-            } else if (boat->y < 650) {
-                boat->y += 5;
-                moved = TRUE;
-            } else {
-                boat->x = 10 + (boat->x - 460);
-                boat->y = 650;
-                strcpy(boat->direction, "izquierda");
-                moved = TRUE;
+            moves_left--;
+        } else {
+            // Boat finished its movement
+            if (boat->y >= 650) {
+                // Move to parking
+                if (strcmp(boat->ocean, "izquierda") == 0) {
+                    boat->x = 10 + (boat->x - 460);
+                } else {
+                    boat->x = 460 + (boat->x - 10);
+                }
+                boat->finished = TRUE;
             }
         }
     }
-    
+
+    printf("Boat %d: %d moves left\n", current_boat_id, moves_left);
+    printf("Boat %d: x=%d, y=%d\n", current_boat_id, boat->x, boat->y);
+    printf("Boat %d: finished=%d\n", current_boat_id, boat->finished);
+
     gtk_widget_queue_draw(sim->canvas);
-    
-    if (!moved) {
-        sim->animation_running = FALSE;
-        sim->animation_timeout_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    
+    usleep(100000);  // Sleep for 100ms to simulate movement time
+
     return G_SOURCE_CONTINUE;
 }
 
@@ -193,28 +211,29 @@ static void start_animation(GtkWidget *widget, gpointer data) {
         gtk_widget_destroy(dialog);
         return;
     }
-    
-    char line[256];
-    int line_count = 0;
-    while (fgets(line, sizeof(line), f)) {
-        line_count++;
-    }
     fclose(f);
-    
-    if (line_count <= 1) {
+
+    // Execute calendar.c
+    system("./calendar");
+
+    // Read output.txt
+    FILE *output_file = fopen("output.txt", "r");
+    if (!output_file) {
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
             GTK_DIALOG_DESTROY_WITH_PARENT,
             GTK_MESSAGE_ERROR,
             GTK_BUTTONS_CLOSE,
-            "Debe haber al menos un barco en barcos.txt para iniciar la simulación.");
+            "No se pudo abrir output.txt");
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
         return;
     }
-    
+    fclose(output_file);
+
     sim->animation_running = TRUE;
     sim->animation_timeout_id = g_timeout_add(50, animate_boats, sim);
 }
+
 
 static void control_changed(GtkComboBox *widget, gpointer data) {
     BoatSimulator *sim = (BoatSimulator *)data;
@@ -454,7 +473,7 @@ static void save_data(GtkWidget *widget, gpointer data) {
     };
     const char *types[] = {"Normal", "Pesquero", "Patrulla"};
     
-    // Calcular posiciones iniciales y offsets
+    // Calculate initial positions and offsets
     int left_x = 20;
     int right_x = 470;
     int y_offset = 20;
@@ -467,7 +486,7 @@ static void save_data(GtkWidget *widget, gpointer data) {
             const char *count_text = gtk_entry_get_text(GTK_ENTRY(entries[dir][type]));
             int count = atoi(count_text);
             
-            for (int i = 0; i < count && boat_count < MAX_BOATS; i++) {
+            for (int i = 0; i < count && sim->boat_count < MAX_BOATS; i++) {
                 char prompt[100];
                 snprintf(prompt, sizeof(prompt), 
                     "Ingrese la prioridad para el barco %s %d:", types[type], id_counter);
@@ -490,8 +509,16 @@ static void save_data(GtkWidget *widget, gpointer data) {
                 fprintf(boats_file, "%d %s %s %d %d %d\n",
                     id_counter, types[type], directions[dir], priority, sjf_time, max_time);
                 
-                // Add boat to display with updated positioning
-                Boat *boat = &displayed_boats[boat_count];
+                // Add boat to the simulator's boat array
+                Boat *boat = &sim->boats[sim->boat_count];
+                boat->id = id_counter;
+                strcpy(boat->type, types[type]);
+                strcpy(boat->ocean, directions[dir]);
+                boat->priority = priority;
+                boat->sjf_time = sjf_time;
+                boat->max_time = max_time;
+                boat->finished = FALSE;
+
                 int *boats_count = (dir == 0) ? &left_boats_count : &right_boats_count;
                 int row = *boats_count / max_boats_per_row;
                 int col = *boats_count % max_boats_per_row;
@@ -504,9 +531,6 @@ static void save_data(GtkWidget *widget, gpointer data) {
                     boat->y = y_offset + (row * 40);
                 }
                 
-                strcpy(boat->type, types[type]);
-                strcpy(boat->direction, directions[dir]);
-                
                 if (strcmp(types[type], "Normal") == 0)
                     boat->pixbuf = sim->normal_boat_pixbuf;
                 else if (strcmp(types[type], "Pesquero") == 0)
@@ -515,7 +539,7 @@ static void save_data(GtkWidget *widget, gpointer data) {
                     boat->pixbuf = sim->patrol_boat_pixbuf;
                 
                 (*boats_count)++;
-                boat_count++;
+                sim->boat_count++;
                 id_counter++;
             }
         }

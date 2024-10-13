@@ -22,6 +22,7 @@ typedef struct {
     int tiempo_maximo;
     int velocidad; // Velocidad del barco según su tipo (longitud/tiempo ejm m/s)
     int cruzo;
+    int tiempo_total; // Add the missing semicolon here
 } Barco;
 
 // Variables globales para controlar el canal
@@ -404,6 +405,32 @@ void setear_tiempo_real() {
     }
 }
 
+void registrar_movimiento_barco(int id_barco, int tiempo_avanzado) {
+    static int first_time = 1;
+    FILE *file;
+
+    if (first_time) {
+        file = fopen("output.txt", "w");
+        if (file == NULL) {
+            perror("Error al abrir output.txt");
+            return;
+        }
+        fclose(file);
+        first_time = 0;
+    }
+
+    file = fopen("output.txt", "a");
+    if (file == NULL) {
+        perror("Error al abrir output.txt");
+        return;
+    }
+
+    // Escribir la información en el archivo
+    fprintf(file, "%d,%d\n", id_barco, tiempo_avanzado);
+
+    fclose(file);
+}
+
 void* cruzar_canal_tiempo_real(void* arg) {
     
 }
@@ -427,52 +454,50 @@ void* cruzar_canal_round_robin(void* arg) {
     int conto_barco = 0;
 
     while (barco->tiempo_cruzar > 0) {
-        cemutex_lock(&canal_mutex); // Bloquear el mutex para evitar colisiones
+        cemutex_lock(&canal_mutex);
 
-            // Esperar hasta que el letrero permita que avance y sea su turno de prioridad
-    while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
-           (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
-           (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
-        cecond_wait(&canal_disponible, &canal_mutex); // Esperar hasta que el canal esté disponible
-    }
-        
-
-        barcos_avanzando++; // Indicar que un barco está avanzando
-        if (conto_barco == 0){
-        	barcos_cruzando++;
-        	conto_barco = 1;
+        while (strcmp(letrero, barco->oceano) != 0 || barcos_avanzando >= 1 ||
+               (strcmp(barco->oceano, "derecha") == 0 && barco->id != id_barco_prioridad_der) ||
+               (strcmp(barco->oceano, "izquierda") == 0 && barco->id != id_barco_prioridad_izq)) {
+            cecond_wait(&canal_disponible, &canal_mutex);
         }
 
+        barcos_avanzando++;
+        if (conto_barco == 0) {
+            barcos_cruzando++;
+            conto_barco = 1;
+        }
 
-        cemutex_unlock(&canal_mutex); // Desbloquear el mutex mientras avanza
+        cemutex_unlock(&canal_mutex);
 
-        // Simulamos el avance del barco por un tiempo quantum
         int tiempo_a_avanzar = (barco->tiempo_cruzar > QUANTUM) ? QUANTUM : barco->tiempo_cruzar;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
-        sleep(tiempo_a_avanzar); // Simulamos el tiempo que tarda en avanzar
+        
+        // Registrar el movimiento del barco
+        registrar_movimiento_barco(barco->id, tiempo_a_avanzar);
+        
+        //sleep(tiempo_a_avanzar);
 
-        // Reducimos el tiempo restante del barco
         barco->tiempo_cruzar -= tiempo_a_avanzar;
-        
 
-        cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
-        barcos_avanzando--; // El barco terminó su avance, liberar el turno
-        
+        cemutex_lock(&canal_mutex);
+        barcos_avanzando--;
 
         if (barco->tiempo_cruzar <= 0) {
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
             barco->cruzo = 1;
             barcos_cruzando--;
+            
+            // Registrar que el barco ha completado el cruce
+            registrar_movimiento_barco(barco->id, 0);
         }
-        
+
         setear_round_robin();
-        // Notificar a otro barco del mismo lado que puede avanzar
         cecond_broadcast(&canal_disponible);
 
-        cemutex_unlock(&canal_mutex); // Desbloquear el mutex para permitir que otros barcos avancen
+        cemutex_unlock(&canal_mutex);
 
-        // Esperar un breve momento para simular el cambio de turno
-        sleep(1);
+        //sleep(1);
     }
 
     cethread_exit(NULL);
@@ -581,7 +606,7 @@ int main() {
     time_t ultimo_cambio = time(NULL);
 
     while (1) {
-        sleep(1); // Intervalo corto para permitir la detección oportuna de cambios
+        //sleep(1); // Intervalo corto para permitir la detección oportuna de cambios
 
         time_t ahora = time(NULL);
         if (difftime(ahora, ultimo_cambio) >= intervalo_letrero) {
