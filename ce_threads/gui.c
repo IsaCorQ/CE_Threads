@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <math.h>
+#include "CEthreads.h"
 
 #define MAX_BOATS 100
 
@@ -196,9 +197,9 @@ static gboolean animate_boats(gpointer data) {
         printf("Moving Boat ID %d (%s) from %s side\n", boat->id, boat->type, boat->ocean);
         
         int speed_multiplier;
-        if (strcmp(boat->type, "Normal") == 0) speed_multiplier = 1;
-        else if (strcmp(boat->type, "Pesquero") == 0) speed_multiplier = 2;
-        else speed_multiplier = 3; // Patrulla
+        if (strcmp(boat->type, "Normal") == 0) speed_multiplier = 10;
+        else if (strcmp(boat->type, "Pesquero") == 0) speed_multiplier = 20;
+        else speed_multiplier = 50; // Patrulla
 
         // Calculate move distance based on speed
         int move_distance = 5 * speed_multiplier;
@@ -274,9 +275,9 @@ static void start_animation(GtkWidget *widget, gpointer data) {
     }
     fclose(f);
 
-    // Create and start the calendar thread
-    pthread_t calendar_thread;
-    if (pthread_create(&calendar_thread, NULL, run_calendar, NULL) != 0) {
+    // Crear e iniciar el hilo de calendar usando CEthreads
+    cethread_t calendar_thread;
+    if (cethread_create(&calendar_thread, NULL, run_calendar, NULL) != 0) {
         GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(sim->window),
             GTK_DIALOG_DESTROY_WITH_PARENT,
             GTK_MESSAGE_ERROR,

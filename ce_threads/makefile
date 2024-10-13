@@ -14,8 +14,8 @@ gui: gui.c calendar.c $(OBJ_FILES)
 calendar: calendar.c $(OBJ_FILES)
 	$(CC) -o calendar calendar.c $(OBJ_FILES)
 
-gui-completo: gui.c calendar.c CEthreads.c
-	$(CC) -o gui gui.c calendar.c CEthreads.c $(CFLAGS)
+gui-completo: gui.c CEthreads.c
+	$(CC) -o gui gui.c CEthreads.c $(CFLAGS)
 
 # Ejecutar gui
 run-gui:
