@@ -1,6 +1,4 @@
-#define RPL 53
-#define GPL 52
-#define BPL 51
+#define CRZ 51
 #define RPR 3
 #define GPR 4
 #define BPR 5
@@ -39,9 +37,7 @@ void setup() {
     pinMode(segmentPins[i], OUTPUT);
   }
 
-  pinMode(RPL, OUTPUT);
-  pinMode(GPL, OUTPUT);
-  pinMode(BPL, OUTPUT);
+  pinMode(CRZ, OUTPUT);
 
   pinMode(RPR, OUTPUT);
   pinMode(GPR, OUTPUT);
@@ -103,6 +99,10 @@ void loop() {
           digitalWrite(RPR, HIGH);
           digitalWrite(GPR, LOW);
           digitalWrite(BPR, LOW); // Red for priority boats
+        } else if (receivedDigit == 's') {
+          digitalWrite(CRZ, HIGH);
+          delay(500);
+          digitalWrite(CRZ, LOW);
         }
     }
   if (millis() - lastSignalTime > 1000) { // Example 1 second delay
@@ -110,69 +110,31 @@ void loop() {
     }
 }
 
-void RGBCL() {
-  if (Serial.available() > 0) {
-    char type = Serial.read();
-    if (type == 'No') {
-        analogWrite(RPL, 0);
-        analogWrite(GPL, 255);
-        analogWrite(BPL, 0); // Green for small boats
-    } else if (type == 'Pe') {
-        analogWrite(RPL, 0);
-        analogWrite(GPL, 0);
-        analogWrite(BPL, 255); // Blue for large boats
-    } else if (type == 'Pa') {
-        analogWrite(RPL, 255);
-        analogWrite(GPL, 0);
-        analogWrite(BPL, 0); // Red for priority boats
-    }
-  }
-}
-
-void RGBCR() {
-  if (Serial.available() > 0) {
-    char type = Serial.read();
-    if (type == 'no') {
-        analogWrite(RPR, 0);
-        analogWrite(GPR, 255);
-        analogWrite(BPR, 0); // Green for small boats
-    } else if (type == 'pe') {
-        analogWrite(RPR, 0);
-        analogWrite(GPR, 0);
-        analogWrite(BPR, 255); // Blue for large boats
-    } else if (type == 'pa') {
-        analogWrite(RPR, 255);
-        analogWrite(GPR, 0);
-        analogWrite(BPR, 0); // Red for priority boats
-    }
-  }
-}
-
 void cruzarCL(){
   digitalWrite(LY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(LY, LOW);
-  delay(250);
+  delay(500);
   digitalWrite(MY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(MY, LOW);
-  delay(250);
+  delay(500);
   digitalWrite(RY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(RY, LOW);
 }
 
 void cruzarCR(){
   digitalWrite(RY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(RY, LOW);
-  delay(250);
+  delay(500);
   digitalWrite(MY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(MY, LOW);
-  delay(250);
+  delay(500);
   digitalWrite(LY, HIGH);
-  delay(250);
+  delay(500);
   digitalWrite(LY, LOW);
 }
 
@@ -185,10 +147,6 @@ void displayDigit(int value) {
 }
 
 void resetLEDs() {
-  digitalWrite(RPL, LOW);
-  digitalWrite(GPL, LOW);
-  digitalWrite(BPL, LOW);
-
   digitalWrite(RPR, LOW);
   digitalWrite(GPR, LOW);
   digitalWrite(BPR, LOW);
@@ -202,6 +160,8 @@ void resetLEDs() {
   digitalWrite(LY, LOW);
   digitalWrite(MY, LOW);
   digitalWrite(RY, LOW);
+
+  digitalWrite(CRZ, LOW);
 
   for (int i = 0; i < 7; i++) {
     digitalWrite(segmentPins[i], LOW);

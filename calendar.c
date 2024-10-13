@@ -47,6 +47,7 @@ int barcos_izq = 0;
 int barcos_der = 0;
 char direccion[9];
 char tipo[8];
+char cruza[2];
 int signalSent = 0;
 
 // Function to count boats in the left and right oceans
@@ -394,6 +395,9 @@ void* cruzar_canal_tiempo_real(void* arg) {
         printf("Barco %d (Tiempo máximo: %d, Tiempo restante: %d) está cruzando el canal...\n", 
                barco->id, barco->tiempo_maximo, barco->tiempo_cruzar);
         
+        strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
+
         strcpy(direccion, barco->oceano);
         write(serial_port, direccion, 1);
 
@@ -405,6 +409,8 @@ void* cruzar_canal_tiempo_real(void* arg) {
         barcos_avanzando--; // El barco libera el control tras un segundo de avance
 
         if (barco->tiempo_cruzar == 0) {
+            strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado completamente el canal.\n", barco->id);
             barco->cruzo = 1; // Marcar el barco como que ya cruzó
             barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
@@ -456,6 +462,9 @@ void* cruzar_canal_prioridad(void* arg) {
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
     
+    strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
+
     strcpy(direccion, barco->oceano);
     write(serial_port, direccion, 1);
     
@@ -465,6 +474,8 @@ void* cruzar_canal_prioridad(void* arg) {
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     barco->cruzo = 1; // Actualizar el estado del barco
 
@@ -514,26 +525,23 @@ void* cruzar_canal_fcfs(void* arg) {
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
     
-    strcpy(direccion, barco->oceano);
-    write(serial_port, direccion, 1);
-    sleep(1);
-
     strcpy(tipo, barco->tipo);
     write(serial_port, &tipo[1], 1);
+
+    strcpy(direccion, barco->oceano);
+    write(serial_port, direccion, 1);
     
     sleep(barco->tiempo_cruzar); // Simular el tiempo que tarda en cruzar el canal completamente
 
     cemutex_lock(&canal_mutex); // Bloquear el mutex nuevamente para actualizar el estado
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
-    if (signalSent == 0){
-        strcpy(direccion, barco->oceano);
-        write(serial_port, direccion, 1);
-        signalSent =1;
-    }
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
+    sleep(1);
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
     setear_fcfs();
     sleep(1);
@@ -576,6 +584,9 @@ void* cruzar_canal_sjf(void* arg) {
     printf("Barco %d (Prioridad: %d, Océano: %s, Tiempo en cruzar: %d) está cruzando el canal...\n", 
            barco->id, barco->prioridad, barco->oceano, barco->tiempo_cruzar);
     
+    strcpy(tipo, barco->tipo);
+    write(serial_port, &tipo[1], 1);
+
     strcpy(direccion, barco->oceano);
     write(serial_port, direccion, 1);
 
@@ -585,6 +596,8 @@ void* cruzar_canal_sjf(void* arg) {
     barcos_avanzando--; // El barco terminó de cruzar, liberar el turno
 
     printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
+    strcpy(cruza, "s");
+    write(serial_port, cruza, 1);
     barco->cruzo = 1; // Actualizar el estado del barco
     barcos_terminados++;//agrega a la variable que el barco finalizó su recorrido
 
@@ -637,6 +650,9 @@ void* cruzar_canal_round_robin(void* arg) {
         int tiempo_a_avanzar = (barco->tiempo_cruzar > QUANTUM) ? QUANTUM : barco->tiempo_cruzar;
         printf("Barco %d (Tipo: %s, Océano: %s) avanza por %d segundos...\n", barco->id, barco->tipo, barco->oceano, tiempo_a_avanzar);
         
+        strcpy(tipo, barco->tipo);
+        write(serial_port, &tipo[1], 1);
+
         strcpy(direccion, barco->oceano);
         write(serial_port, direccion, 1);
 
@@ -651,6 +667,8 @@ void* cruzar_canal_round_robin(void* arg) {
         
 
         if (barco->tiempo_cruzar <= 0) {
+            strcpy(cruza, "s");
+            write(serial_port, cruza, 1);
             printf("Barco %d ha cruzado el canal completamente.\n", barco->id);
             barcos_terminados++; //agrega a la variable que el barco finalizó su recorrido
             barco->cruzo = 1;
