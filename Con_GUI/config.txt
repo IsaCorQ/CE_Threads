@@ -1,0 +1,2 @@
+Algoritmo Control ValoControl AnchoCanal IntervaloLetrero
+FCFS Tico 0 4 1
